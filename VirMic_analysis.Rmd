@@ -1,0 +1,2314 @@
+---
+title: "VirMic_analysis.Rmd"
+author: "CWigington"
+output: pdf_document
+---
+
+World-wide locations from which samples were collected. Over 5,671 samples were collected by 25 cruises to create the dataset used in the analysis. The data includes only samples with both microbe and virus like particle samples from marine environments. Each black dot represents the location at which one or more samples were taken. Samples were taken in coastal, deep ocean, arctic, and tropical waters at both depths as shallow as 1 meter to up to 5,931 meters.
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+#check for packages needed to create the figures below
+install.packages('https://cran.r-project.org/src/contrib/Archive/lmmfit/lmmfit_1.0.tar.gz', repos = NULL, type="source")
+
+list.of.packages <- c("grid","rmarkdown", "ggplot2", "dplyr","maps","mapproj","lme4","smatr","scales","lmodel2","knitr","nlme","reshape2","lmmfit","gridExtra","plyr")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages, repos="http://cran.rstudio.com/")
+#load pacakges
+require(ggplot2)
+require(plyr)
+require(dplyr)
+require(maps)
+require(mapproj)
+require(lme4)
+require(smatr)
+require(scales)
+require(lmodel2)
+require(knitr)
+require(nlme)
+require(reshape2)
+require(lmmfit)
+require(gridExtra)
+require(rmarkdown)
+require(grid)
+
+dir.create("output", showWarnings = FALSE)
+dir.create("output/figures", showWarnings = FALSE)
+dir.create("output/figures/jpg", showWarnings = FALSE)
+dir.create("output/figures/pdf", showWarnings = FALSE)
+dir.create("output/data", showWarnings = FALSE)
+data = read.csv("VIRBACDATA.txt")
+#save(data, file = "output/data/DATA.RData")
+
+calcRSQ <- function(obs,pred){
+  ssTotal <- sum((obs-mean(obs))^2)
+  ssResidual <- sum((obs - pred)^2)
+  return(1-(ssResidual/ssTotal))
+}
+
+insert_minor <- function(major_labs, n_minor,blanks) {labs <- 
+                              c( sapply( major_labs, function(x) c(x, rep("", blanks) ) ) )
+                              labs[1:(length(labs)-n_minor)]}
+#load("output/data/DATA.RData")
+#write.table(data, file = "VirMic_data.csv", append = FALSE, sep = " ", row.names = F, col.names = TRUE, qmethod = c("escape", "double"))
+
+```
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/DATA.RData")
+
+world <- map_data("world")
+index <- which(world$long > 178 & world$long < 190.3)
+clean.world <- world[-index, ]
+data$DeepShallow <- factor(data$DEPTH > 100, labels=c('<=100m', '>100m'))
+#summary(data$DeepShallow)
+#>100m    <=100m
+#2921      2750
+#levels(data$Study)
+
+worldmap <- ggplot(clean.world, aes(x=long, y=lat)) + 
+  geom_polygon( aes(group=group), color='grey80',fill='grey80' )
+
+worldmap<-worldmap + 
+  theme(title = element_text(size=20),
+        axis.text=element_text(size=16),
+        axis.title=element_text(size=16,face="bold"),           
+        #text = element_text(size=32),aspect.ratio=1, panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank())               
+
+for (i in seq(1:nrow(data))){
+  if (data$DEPTH[i] <= 100){
+    data$DeepShallowColor[i] = "chartreuse3"
+  }
+  else {
+    data$DeepShallowColor[i] = "blue"
+  }
+}
+
+points<-as.data.frame(table(data$Study))
+names(points) <- c("Study", "Freq")
+points$logfreq<-ifelse(log10(points$Freq)>0, log10(points$Freq), points$logfreq<-0)
+newrow <- data.frame(Study = c('Total'), Freq = c(nrow(data)), logfreq = c(log10(nrow(data))))
+total<-rbind(points,newrow)
+total1<-total[which(total$Freq > 0),]
+#kable(total1[,1:2])
+data<-merge(data,points,by="Study")
+
+longs<-c()
+lats<-c()
+samples<-c()
+points1<-as.matrix(table(data$long,data$lat))
+for (long in seq(1,nrow(points1))){
+  for (lat in seq(1,ncol(points1))){
+    if (points1[long,lat] >0){
+      #points[2,29]
+      longs<-c(longs,rownames(points1)[long])
+      lats<-c(lats,colnames(points1)[lat])
+      samples<-c(samples,points1[long,lat])
+    }
+  }
+}
+
+counts<-as.data.frame(cbind(longs,lats,samples,log10(samples)+1))
+
+names(counts) <- c("long", "lat","samples","log10samplesplusone")
+data<-merge(data,counts,by=c("long","lat"))
+
+
+
+
+data$DeepShallowsize<-ifelse(data$DeepShallow == '>100m',2,4)
+deep_layer <- data[data$DeepShallow == '>100m',]
+shallow_layer <- data[data$DeepShallow == '<=100m',]
+
+map <- worldmap + 
+  geom_point(data=data, aes(x=long, y=lat, col=data$DeepShallowColor)) +
+  geom_point(data=deep_layer,aes(x=long, y=lat),shape=15, colour="chartreuse3", size=4, alpha=1) +
+  geom_point(data=shallow_layer, aes(x=long, y=lat), shape=20, colour="blue", size=3, alpha=1) +
+  scale_color_manual(name=element_blank(), values=c("chartreuse3","blue"), labels=c('>100m','<=100m')) +
+  scale_shape_manual(name=element_blank(), values=c(15,20), labels=c('>100m','<=100m')) +
+  scale_size_manual(name=element_blank(), values = c(0, 0), labels=c('>100m','<=100m')) +
+  #scale_alpha_manual(guide='none', values = c(.1,1), labels=c('>100m','<=100m')) +
+  #scale_alpha_manual(values = c(.1,1), labels=c('>100m','<=100m'), guide = guide_legend()) +
+  xlab("Longitude") +
+  ylab("Latitude") +
+  theme(title = element_text(size=20),
+        axis.text=element_text(size=16),
+        axis.title=element_text(size=16,face="bold"),
+        #text = element_text(size=32),
+        aspect.ratio=.5,
+        legend.position = 'right',
+        legend.key = element_rect(fill = "white"),
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.key.height = unit(.5,"line")) +
+  guides(colour = guide_legend(override.aes = list(shape=c(15,20),size=c(7,7),color=c("blue","chartreuse3"),alpha=c(1,1))))
+map
+
+pdf("output/figures/pdf/map.pdf", width=10, height=6)
+print(map)
+dev.off()
+
+jpeg("output/figures/jpg/map.jpg", width=500, height=300)
+print(map)
+dev.off()
+
+save(total1, file = "output/data/TOTAL1.RData")
+```
+
+
+Bacterial abundance vs. viral abundance colored by depth category. Each point represents a biological sample and is colored according to its depth category, i.e. samples taken at depths of 100 meters or less are colored gree while samples taken at depths of greater than 100 meters are colored blue.
+
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/DATA.RData")
+data$Study <- factor(data$Study)
+data$log10VIRUS<-log10(data$VIRUS)
+data$log10BACTERIA<-log10(data$BACTERIA)
+data$Log10_VirBac_Ratio <- log10(data$VIRUS/data$BACTERIA)
+insert_minor <- function(major_labs, n_minor,blanks) {labs <- 
+                                                        c( sapply( major_labs, function(x) c(x, rep("", blanks) ) ) )
+                                                      labs[1:(length(labs)-n_minor)]}
+#nrow(data)
+# 5,671
+small <- data[which(!is.na(data$BACTERIA) & !is.na(data$VIRUS)), ]
+small$DepthCategory[small$DEPTH <= 100] <- "<=100m"
+small$DepthCategory[small$DEPTH >  100] <- ">100m"
+small$col<-ifelse(small$DepthCategory == "<=100m","chartreuse3","blue")
+small$pch<-ifelse(small$DepthCategory == "<=100m",17,16)
+#nrow(small)
+#5671
+
+Allscatterplot<-ggplot(small, aes(x=log10BACTERIA, y=log10VIRUS, color=DepthCategory)) +
+  geom_point(size=3,shape=20) +
+  geom_density2d(colour="black", bins=10)+
+  scale_color_manual(name="Depth", values=c("blue","chartreuse3")) +
+  labs(list(x=expression('Microbes per mL (log'[10]*' scale)'), 
+            y=expression('Viruses per mL (log'[10]*' scale)'))) + 
+  theme(plot.title=element_text(size=32),
+        axis.text=element_text(size=16),
+        axis.title=element_text(size=16,face="bold"),
+        aspect.ratio=1,
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.key = element_rect(fill = "white"),
+        legend.title = element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position = c(.2,.85)) +
+  scale_x_continuous(breaks = c(seq(3.5,9,by=.25)), 
+                     labels = c(insert_minor(seq(3.5,9,by=.5),1,1)), 
+                     limits = c(3.5,7.5), 
+                     expand = c(0,0)) +
+  scale_y_continuous(breaks = c(seq(3.5,9,by=.25)), 
+                     labels = c(insert_minor(seq(3.5,9,by=.5),1,1)), 
+                     limits = c(4.75,9), 
+                     expand = c(0,0))
+
+Allscatterplot <- Allscatterplot + guides(colour = guide_legend(override.aes = list(shape=c(16,16),size=c(7,7))))
+
+Allscatterplot
+pdf("output/figures/pdf/Allscatterplot.pdf", width=6, height=6)
+print(Allscatterplot)
+dev.off()
+
+jpeg("output/figures/jpg/Allscatterplot.jpg", width=500, height=500)
+print(Allscatterplot)
+dev.off()
+
+save(small, file = "output/data/SMALL.RData")
+```
+
+
+Histograms of the ratio of viral abundance to Microbial abundance and the log of the ratio of viral abundance to Microbial abundance. The histograms of ratio of viral abundance to Microbial abundance is shown for depth categories. The distribution at the top of the panel represents samples taken at depths of 100 meters or less; samples taken at depths of greater than 100 meters are shown in the bottom panel. The red arrow at the top shows the position of the median value. The blue arrows shows the range of value between which 95 percent of the data is found. The domain of ratio values shown include 99\% of all of the ratio data points.
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/SMALL.RData")
+
+all<-quantile(small$Log10_VirBac_Ratio,probs=c(.025,.5,.975))
+deep<-quantile(small$Log10_VirBac_Ratio[which(small$DepthCategory=='>100m')],probs=c(.025,.5,.975))
+shallow<-quantile(small$Log10_VirBac_Ratio[which(small$DepthCategory=='<=100m')],probs=c(.025,.5,.975))
+ann <- data.frame(
+  iqr25 = c(shallow[1],deep[1]),
+  iqr975=c(shallow[3],deep[3]),
+  med=c(shallow[2],deep[2]),
+  DepthCategory=c('<=100m','>100m'),
+  medtext=c(round(10^shallow[2],2),round(10^deep[2],2)),
+  text25=c(round(10^shallow[1],2),round(10^deep[1],2)),
+  text975=c(round(10^shallow[3],2),round(10^deep[3],2))
+)
+
+h<-hist(small$Log10_VirBac_Ratio[which(small$DepthCategory=='<=100m')], breaks=c(seq(-1,max(small$Log10_VirBac_Ratio)+1,.1)), plot=F)
+shallowmax<-max(h$counts)
+h1<-hist(small$Log10_VirBac_Ratio[which(small$DepthCategory=='>100m')], breaks=c(seq(-1,max(log10(small$VIRUS/small$BACTERIA))+1,.1)), plot=F)
+deepmax<-max(h1$counts)
+#shallowmax<-334
+#deepmax<-366
+
+ann$medValue<-c(shallowmax,deepmax)
+ann$medValuePlusOne<-c(shallowmax+1,deepmax+1)
+ann$medValuePlusTen<-c(shallowmax+10,deepmax+10)
+ann$medValuePlusTwenty<-c(shallowmax+20,deepmax+20)
+ann$medValuePlusThirty<-c(shallowmax+30,deepmax+30)
+require(grid)
+logRatioDistribution<-ggplot(small, aes(x=Log10_VirBac_Ratio, y=..count..)) +
+  geom_histogram(binwidth=.1) +
+  facet_grid(DepthCategory ~ .) +
+  geom_segment(data=ann,aes(x=med,xend=med,y=medValuePlusTwenty,yend=medValue),arrow=arrow(length=unit(0.5,"cm")),show_guide=F, color="#D55E00") +
+  geom_segment(data=ann,aes(x=iqr25,xend=iqr25,y=-20,yend=0),arrow=arrow(length=unit(0.5,"cm")),show_guide=F, color="#0072B2") +
+  geom_segment(data=ann,aes(x=iqr975,xend=iqr975,y=-20,yend=0),arrow=arrow(length=unit(0.5,"cm")),show_guide=F, color="#0072B2") +
+  geom_text(data=ann,aes(x=med,y=medValuePlusThirty,label=medtext),size=5,show_guide=F) +
+  geom_text(data=ann,aes(x=iqr25,y=-30,label=text25),size=5,show_guide=F) +
+  geom_text(data=ann,aes(x=iqr975,y=-30,label=text975),size=5,show_guide=F) +
+  scale_x_continuous(limits=c(min(na.omit(small$Log10_VirBac_Ratio)),max(na.omit(small$Log10_VirBac_Ratio)))) +
+  labs(list(x=expression('Ratio of viral abundance to microbial abundance (on log'[10]*' scale)'), 
+            y='Frequency'))+ 
+  theme(plot.title=element_text(size=32),
+        aspect.ratio=1,
+        axis.text=element_text(size=16),
+        axis.title=element_text(size=16,face="bold"),
+        #text = element_text(size=32),aspect.ratio=1, panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+
+logRatioDistribution
+
+pdf("output/figures/pdf/logRatioDistribution.pdf", width=8, height=10)
+print(logRatioDistribution)
+dev.off()
+
+jpeg("output/figures/jpg/logRatioDistribution.jpg", width=400, height=500)
+print(logRatioDistribution)
+dev.off()
+```
+
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/SMALL.RData")
+
+all<-quantile(small$VIRUS/small$BACTERIA,probs=c(.025,.5,.975))
+deep<-quantile((small$VIRUS/small$BACTERIA)[which(small$DepthCategory=='>100m')],probs=c(.025,.5,.975))
+shallow<-quantile((small$VIRUS/small$BACTERIA)[which(small$DepthCategory=='<=100m')],probs=c(.025,.5,.975))
+xmax<-quantile((small$VIRUS/small$BACTERIA)[which(small$DepthCategory=='<=100m')],probs=c(.99))
+
+ann1 <- data.frame(
+  iqr25 = c(shallow[1],deep[1]),
+  iqr975=c(shallow[3],deep[3]),
+  med=c(shallow[2],deep[2]),
+  DepthCategory=c('<=100m','>100m'),
+  medtext=c(round(shallow[2],2),round(deep[2],2)),
+  text25=c(round(shallow[1],2),round(deep[1],2)),
+  text975=c(round(shallow[3],2),round(deep[3],2))
+)
+small$VirBac_Ratio<-small$VIRUS/small$BACTERIA
+h<-hist(small$VirBac_Ratio[which(small$DepthCategory=='<=100m')], breaks=c(seq(-1,max(small$VirBac_Ratio)+1)), plot=F)
+shallowmax<-max(h$counts)
+h1<-hist(small$VirBac_Ratio[which(small$DepthCategory=='>100m')], breaks=c(seq(-1,max(small$VirBac_Ratio))+1,.1), plot=F)
+deepmax<-max(h1$counts)
+#shallowmax<-30
+#deepmax<-134
+ann1$maxValue<-c(shallowmax,deepmax)
+ann1$maxValuePlusTen<-c(shallowmax+10,deepmax+10)
+ann1$maxValuePlusTwenty<-c(shallowmax+20,deepmax+20)
+ann1$maxValuePlusThirty<-c(shallowmax+30,deepmax+30)
+
+RatioDistribution<-ggplot(small, aes(x=VIRUS/BACTERIA, y=..count..)) +
+  geom_histogram(binwidth=1) +
+  facet_grid(DepthCategory ~ .) +
+  #facet_grid(. ~ DepthCategory) +
+  geom_segment(data=ann1,aes(x=med,xend=med,y=maxValuePlusTwenty,yend=ann1$maxValue),arrow=arrow(length=unit(0.5,"cm")),show_guide=F, color="#D55E00")+
+  geom_segment(data=ann1,aes(x=iqr25,xend=iqr25,y=-20,yend=0),arrow=arrow(length=unit(0.5,"cm")),show_guide=F, color="#0072B2")+
+  geom_segment(data=ann1,aes(x=iqr975,xend=iqr975,y=-20,yend=0),arrow=arrow(length=unit(0.5,"cm")),show_guide=F, color="#0072B2")+
+  geom_text(data=ann1,aes(x=med+10,y=maxValuePlusThirty,label=medtext),size=5,show_guide=F) +
+  geom_text(data=ann1,aes(x=iqr25,y=-30,label=text25),size=5,show_guide=F) +
+  geom_text(data=ann1,aes(x=iqr975,y=-30,label=text975),size=5,show_guide=F) +
+  #xlim(0,xmax)+
+  scale_x_continuous(limits=c(0, xmax),breaks=NULL) +
+  labs(list(x=expression('\nVirus abundance per mL to \nmicrobe abundance per mL ratio (log'[10]*')'), 
+            y='Frequency'))+ 
+  #title='Distribution of the ratio of viral \nto bacterial abundance by depth')) +
+  #title='Distribution of the ratio of Virus \nto Bacteria abundance by depth')) +
+  theme(plot.title=element_text(size=32),
+        axis.text=element_text(size=16),
+        axis.title=element_text(size=16,face="bold"),
+        #text = element_text(size=32),aspect.ratio=1, panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        aspect.ratio=1)
+
+RatioDistribution
+
+pdf("output/figures/pdf/RatioDistribution.pdf", width=8, height=10)
+print(RatioDistribution)
+dev.off()
+
+jpeg("output/figures/jpg/RatioDistribution.jpg", width=400, height=500)
+print(RatioDistribution)
+dev.off()
+```
+
+The log (base 10) of microbe abundance versus the log (base 10) of viral abunndance. Each point represents a biological sample. The black line is a 1:1 line while the red line represents the regression line fit by minimizing the sum of squares for the equation Y = $\alpha$X + $\beta$. Here $\alpha$ is 0.422 and $\beta$ is 4.451.
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/SMALL.RData")
+index <- which( small$DepthCategory == "<=100m")
+smallLabSet<-small[index, ]
+m1<-lm(smallLabSet$log10VIRUS ~ smallLabSet$log10BACTERIA)
+ms <- summary(m1)
+RSQ10BacModel<-list(r2 = format(1-(sum((smallLabSet$log10VIRUS-(1+(1*smallLabSet$log10BACTERIA)))^2)/
+                                     sum((smallLabSet$log10VIRUS-mean(smallLabSet$log10VIRUS))^2)), digits = 3))
+l <- list(r2 = format(ms$r.squared, digits = 3))
+lmeq <- substitute(italic('Power Law') == r2,l)
+lmeqstr <- as.character(as.expression(lmeq))
+Teneq <- substitute(italic('10:1line') == r2,RSQ10BacModel)
+Teneqstr <- as.character(as.expression(Teneq))
+sma<-sma(smallLabSet$log10VIRUS ~smallLabSet$log10BACTERIA, method="SMA")
+sma1<-sma(smallLabSet$VIRUS ~smallLabSet$BACTERIA, method="SMA")
+rsq<-c(round(sma$r2[[1]],3))
+rsqdf<-data.frame(rsq)
+smaeq <- substitute(italic('SMAreg') == rsq,rsqdf)
+#smaeq <- substitute(italic(r)^2 == rsq,rsqdf)
+smaeqstr <- as.character(as.expression(smaeq))
+meaneq <- substitute(italic('Mean') == 0)
+meaneqstr <- as.character(as.expression(meaneq))
+
+shallowmods<-ggplot(smallLabSet, aes(x=log10BACTERIA, y=log10VIRUS)) +
+  geom_point(size=1, col='steel blue') +
+  geom_abline(intercept=coef(m1)[[1]], slope=coef(m1)[[2]], col='#D55E00', size=1) +
+  geom_abline(intercept=1, slope=1, col='black', size=1) +
+  #geom_density2d(colour="black", bins=10, alpha=.75) +
+  annotate(size=6,family="Helvetica", fontface="bold",geom="text",x = 6.8, y = 7.1, label = 'Power Law', parse = F) + 
+  annotate(size=6,family="Helvetica", fontface="bold",geom="text",x = 6.5, y = 7.9, label = '10:1', parse = F) + 
+  geom_segment(aes(x = median(smallLabSet$log10BACTERIA), y = 4.8, xend = median(smallLabSet$log10BACTERIA), yend = 4.87), arrow = arrow(length = unit(0.5, "cm")), col='black') +
+  geom_segment(aes(x = 3.5, y = median(smallLabSet$log10VIRUS)), xend = 3.57, yend = median(smallLabSet$log10VIRUS), arrow = arrow(length = unit(0.5, "cm")), col='black') +
+  labs(list(#x=expression('microbes per mL (log'[10]*')'), 
+    x=expression('Microbes per mL (log'[10]*')'), 
+    y=expression('Viruses per mL (log'[10]*')')))+ 
+  theme(aspect.ratio=1,
+        plot.title=element_text(size=32),
+        axis.text=element_text(size=16), 
+        axis.title=element_text(size=16,face="bold"),
+        #text = element_text(size=32),aspect.ratio=1,
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black")) +
+  scale_x_continuous(breaks = c(seq(2.5,8,by=.25)), 
+                     labels = c(insert_minor(seq(2.5,8,by=.5),1,1)), 
+                     limits = c(3.5,7.5), 
+                     expand = c(0,0)) +
+  scale_y_continuous(breaks = c(seq(4.5,9,by=.25)), 
+                     labels = c(insert_minor(seq(4.5,9,by=.5),1,1)), 
+                     limits = c(4.8,8.75), 
+                     expand = c(0,0)) 
+shallowmods
+
+pdf("output/figures/pdf/shallowmods.pdf", width=8, height=10)
+print(shallowmods)
+dev.off()
+
+jpeg("output/figures/jpg/shallowmods.jpg", width=400, height=500)
+print(shallowmods)
+dev.off()
+
+save(smallLabSet, file = "output/data/SMALLLABSET.RData")
+```
+
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/SMALL.RData")
+index <- which( small$DepthCategory == ">100m")
+DeepSmall<-small[index, ]
+m1<-lm(DeepSmall$log10VIRUS ~ DeepSmall$log10BACTERIA)
+ms <- summary(m1)
+RSQ10BacModel<-list(r2 = format(1-(sum((DeepSmall$log10VIRUS-(1+(1*DeepSmall$log10BACTERIA)))^2)/
+                                     sum((DeepSmall$log10VIRUS-mean(DeepSmall$log10VIRUS))^2)), digits = 3))
+l <- list(r2 = format(ms$r.squared, digits = 3))
+lmeq <- substitute(italic('Power Law') == r2,l)
+lmeqstr <- as.character(as.expression(lmeq))
+Teneq <- substitute(italic('10:1line') == r2,RSQ10BacModel)
+Teneqstr <- as.character(as.expression(Teneq))
+sma<-sma(DeepSmall$log10VIRUS ~DeepSmall$log10BACTERIA, method="SMA")
+sma1<-sma(DeepSmall$VIRUS ~DeepSmall$BACTERIA, method="SMA")
+rsq<-c(round(sma$r2[[1]],3))
+rsqdf<-data.frame(rsq)
+smaeq <- substitute(italic('SMAreg') == rsq,rsqdf)
+smaeqstr <- as.character(as.expression(smaeq))
+meaneq <- substitute(italic('Mean') == 0)
+meaneqstr <- as.character(as.expression(meaneq))
+
+deepmods<-ggplot(DeepSmall, aes(x=log10BACTERIA, y=log10VIRUS)) +
+  geom_point(size=1, col='steel blue') +
+  geom_abline(intercept=coef(m1)[[1]], slope=coef(m1)[[2]], col='#D55E00', size=1) +
+  geom_abline(intercept=1, slope=1, col='black', size=1) +
+  #geom_density2d(colour="black", bins=10, alpha=.75) +
+  annotate(size=6,family="Helvetica", fontface="bold",geom="text",x = 6.8, y = 7.1, label = 'Power Law', parse = F) + 
+  annotate(size=6,family="Helvetica", fontface="bold",geom="text",x = 6.5, y = 7.9, label = '10:1', parse = F) + 
+  geom_segment(aes(x = median(DeepSmall$log10BACTERIA), y = 4.8, xend = median(DeepSmall$log10BACTERIA), yend = 4.87), arrow = arrow(length = unit(0.5, "cm")), col='black') +
+  geom_segment(aes(x = 3.5, y = median(DeepSmall$log10VIRUS)), xend = 3.57, yend = median(DeepSmall$log10VIRUS), arrow = arrow(length = unit(0.5, "cm")), col='black') +
+  labs(list(#x=expression('Microbes per mL (log'[10]*')'), 
+    x=expression('Microbes per mL (log'[10]*')'), 
+    y=expression('Viruses per mL (log'[10]*')')))+ 
+  theme(aspect.ratio=1,
+        plot.title=element_text(size=32),
+        axis.text=element_text(size=16), 
+        axis.title=element_text(size=16,face="bold"),
+        #text = element_text(size=32),aspect.ratio=1,
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black")) +
+  scale_x_continuous(breaks = c(seq(2.5,8,by=.25)), 
+                     labels = c(insert_minor(seq(2.5,8,by=.5),1,1)), 
+                     limits = c(3.5,7.5), 
+                     expand = c(0,0)) +
+  scale_y_continuous(breaks = c(seq(4.5,9,by=.25)), 
+                     labels = c(insert_minor(seq(4.5,9,by=.5),1,1)), 
+                     limits = c(4.8,8.75), 
+                     expand = c(0,0)) 
+deepmods
+
+pdf("output/figures/pdf/deepmods.pdf", width=8, height=10)
+print(deepmods)
+dev.off()
+
+jpeg("output/figures/jpg/deepmods.jpg", width=400, height=500)
+print(deepmods)
+dev.off()
+
+save(DeepSmall, file = "output/data/DEEPSMALL.RData")
+```
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/SMALLLABSET.RData")
+load("output/data/SMALL.RData")
+load("output/data/DEEPSMALL.RData")
+summary(small)
+small$DeepShallow<-small$DepthCategory
+ann4 <- data.frame(
+  intset = c(summary(lm(smallLabSet$log10VIRUS ~ smallLabSet$log10BACTERIA))$coefficients[1],summary(lm(DeepSmall$log10VIRUS ~ DeepSmall$log10BACTERIA))$coefficients[1]),
+  slopeset = c(summary(lm(smallLabSet$log10VIRUS ~ smallLabSet$log10BACTERIA))$coefficients[2],summary(lm(DeepSmall$log10VIRUS ~ DeepSmall$log10BACTERIA))$coefficients[2]),
+  MEintset= c(summary(lme(log10VIRUS~log10BACTERIA, random=~1+log10BACTERIA|Study,data=smallLabSet))$coefficients$fixed[1],summary(lme(log10VIRUS~log10BACTERIA, random=~1+log10BACTERIA|Study,data=DeepSmall))$coefficients$fixed[1]),
+  MEslopeset = c(summary(lme(log10VIRUS~log10BACTERIA, random=~1+log10BACTERIA|Study,data=smallLabSet))$coefficients$fixed[2],summary(lme(log10VIRUS~log10BACTERIA, random=~1+log10BACTERIA|Study,data=DeepSmall))$coefficients$fixed[2]),
+  DeepShallow = c('<=100m', '>100m'),
+  BacMedians = c(median(smallLabSet$log10BACTERIA), median(DeepSmall$log10BACTERIA)),
+    VirMedians = c(median(smallLabSet$log10VIRUS), median(DeepSmall$log10VIRUS))
+  )
+
+ann5 <- data.frame(meX = 3.73, 
+                   meY = 5.3, 
+                   plX = 6.8,
+                   plY = 6.9, 
+                   toX=7, 
+                   toY = 8.3, 
+                   DeepShallow = factor('<=100m', levels = c('<=100m', '>100m')))
+
+shallowDeepMods<-ggplot(small, aes(x=log10BACTERIA, y=log10VIRUS)) +
+  geom_point(col='steel blue',pch=20, size=1) +
+  facet_grid(. ~ DeepShallow) +
+  geom_abline(data=ann4, aes(intercept=intset, slope=slopeset), col='#D55E00', size=1) + #orange power law line
+  #geom_abline(data=ann4, aes(intercept=MEintset, slope=MEslopeset), col='#33CC33', size=1) + #green mixed effects Fixed Effects line
+  geom_abline(intercept=1, slope=1, col='black', size=1) + #black line
+  geom_segment(data=ann4,aes(x=BacMedians,xend=BacMedians,y=4.8,yend=4.9),arrow=arrow(length=unit(0.3,"cm")),show_guide=F, color="black") +
+  geom_segment(data=ann4,aes(x=3.5,xend=3.6,y=VirMedians,yend=VirMedians),arrow=arrow(length=unit(0.3,"cm")),show_guide=F, color="black") +
+   geom_text(data=ann5,aes(x=toX,y=toY,label='10:1'),show_guide=F,size=6,family="Helvetica", fontface="bold") + 
+   geom_text(data=ann5,aes(x=plX,y=plY,label='Power Law'),show_guide=F,size=6,family="Helvetica", fontface="bold") + 
+  labs(list(x=expression('Microbes per mL (log'[10]*' scale)'), 
+            y=expression('Viruses per mL (log'[10]*' scale)')))+
+  theme(panel.margin = unit(2, "lines"),
+        strip.background = element_rect(fill="white"),
+        strip.text.x = element_text(size = 20,face="bold"),
+          aspect.ratio=1,
+          plot.title=element_text(size=32),
+          axis.text=element_text(size=12), 
+          axis.title=element_text(size=16,face="bold"),
+          #text = element_text(size=32),aspect.ratio=1,
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(),
+          axis.line = element_line(colour = "black")) +
+    scale_x_continuous(breaks = c(seq(2.5,8,by=.25)), 
+                     labels = c(insert_minor(seq(2.5,8,by=.5),1,1)), 
+                     limits = c(3.5,7.5), 
+                     expand = c(0,0)) +
+    scale_y_continuous(breaks = c(seq(4.5,9,by=.25)), 
+                     labels = c(insert_minor(seq(4.5,9,by=.5),1,1)), 
+                     limits = c(4.8,8.75), 
+                     expand = c(0,0))
+shallowDeepMods
+pdf("output/figures/pdf/shallowDeepMods.pdf", width=10, height=7)
+print(shallowDeepMods)
+dev.off()
+
+jpeg("output/figures/jpg/shallowDeepMods.jpg", width=500, height=350)
+print(shallowDeepMods)
+dev.off()
+
+```
+
+Where the R-squared of the 10:1 model was calculated with log transformed data with an intercept of one and a coefficient of one, the r-squared values of a set of similar models were calculated to understand how varying the intercept by very small amounts relates to the r-squared of the model
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/SMALLLABSET.RData")
+m1<-lm(smallLabSet$log10VIRUS ~ smallLabSet$log10BACTERIA)
+ms <- summary(m1)
+ints<-c()
+rsqs<-c()
+for (int in seq(0,1.5,length=1000)){
+  rsq<- 1-(sum((smallLabSet$log10VIRUS-(int+(smallLabSet$log10BACTERIA)))^2)/
+             sum((smallLabSet$log10VIRUS-mean(smallLabSet$log10VIRUS))^2))
+  rsqs<-c(rsqs,rsq)
+  ints<-c(ints,int)
+}
+
+df<-as.data.frame(cbind(rsqs,ints))
+nm<-as.character(expression('R'^{2}))
+shallowlinearmods<-ggplot(data=df, aes(x=10^ints, y=rsqs)) +
+  geom_point(size=1,col='steel blue')+
+  geom_hline(yintercept=ms$r.squared) +
+  geom_hline(yintercept=0, lty=2) +
+  annotate(size=4,family="Helvetica", fontface="bold",geom="text",x = 10.25, y = 0.25, label = 'Power Law' , parse = F) +
+  annotate(size=4,family="Helvetica", fontface="bold",geom="text",x = 30.25, y = -0.55, label = 'Fixed Ratio' , parse = F) +
+  labs(list(x='Fixed VPR', 
+            #         x=expression('10'^{alpha}), 
+            y = expression(paste("Variance Explained (R"^"2",")"))))+
+  theme(aspect.ratio=1,
+        plot.title=element_text(size=20),
+        axis.text=element_text(size=16),
+        axis.title=element_text(size=16,face="bold"), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.position = c(.15,.8)) +
+  scale_y_continuous(breaks = round(sort(c(seq(-5,1, length.out=7), ms$r.squared)),3),
+                     #labels = c(insert_minor(seq(-6,2,by=1),0,0)), 
+                     limits = c(-5,1.1), 
+                     expand = c(0,0))
+shallowlinearmods
+pdf("output/figures/pdf/shallowlinearmods.pdf", width=8, height=10)
+print(shallowlinearmods)
+dev.off()
+
+jpeg("output/figures/jpg/shallowlinearmods.jpg", width=400, height=500)
+print(shallowlinearmods)
+dev.off()
+```
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/DEEPSMALL.RData")
+m1<-lm(DeepSmall$log10VIRUS ~ DeepSmall$log10BACTERIA)
+ms <- summary(m1)
+ints<-c()
+rsqs<-c()
+for (int in seq(0,1.5,length=1000)){
+  rsq<- 1-(sum((DeepSmall$log10VIRUS-(int+(DeepSmall$log10BACTERIA)))^2)/
+             sum((DeepSmall$log10VIRUS-mean(DeepSmall$log10VIRUS))^2))
+  rsqs<-c(rsqs,rsq)
+  ints<-c(ints,int)
+}
+df<-as.data.frame(cbind(rsqs,ints))
+nm<-as.character(expression('R'^{2}))
+deeplinearmods<-ggplot(data=df, aes(x=10^ints, y=rsqs)) +
+  geom_point(size=1,col='steel blue')+
+  geom_hline(yintercept=0, lty=2) +
+  annotate(size=4,family="Helvetica", fontface="bold",geom="text",x = 10.25, y = 0.82, label = 'Power Law' , parse = F) +
+  annotate(size=4,family="Helvetica", fontface="bold",geom="text",x = 30.25, y = -0.75, label = 'Fixed Ratio' , parse = F) +
+  geom_hline(aes(yintercept=ms$r.squared)) +
+  scale_y_continuous(breaks = round(sort(c(seq(-5,1, length.out=7), ms$r.squared)),3))+
+  labs(list(x='Fixed VPR', 
+            y = expression(paste("Variance Explained (R"^"2",")"))))+
+  theme(aspect.ratio=1,
+        plot.title=element_text(size=20),
+        axis.text=element_text(size=16),
+        axis.title=element_text(size=16,face="bold"), 
+        #text = element_text(size=32),aspect.ratio=1,
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.position = c(.15,.8))+
+  scale_y_continuous(breaks = round(sort(c(seq(-5,1, length.out=7), ms$r.squared)),3),
+                     #labels = c(insert_minor(seq(-6,2,by=1),0,0)), 
+                     limits = c(-5,1.1), 
+                     expand = c(0,0))
+deeplinearmods
+pdf("output/figures/pdf/deeplinearmods.pdf", width=8, height=10)
+print(deeplinearmods)
+dev.off()
+
+jpeg("output/figures/jpg/deeplinearmods.jpg", width=400, height=500)
+print(deeplinearmods)
+dev.off()
+
+```
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/SMALLLABSET.RData")
+load("output/data/SMALL.RData")
+load("output/data/DEEPSMALL.RData")
+
+ann4 <- data.frame(
+  zeroInt = c(0,0),
+  powerlawInt = c(summary(lm(smallLabSet$log10VIRUS ~ smallLabSet$log10BACTERIA))$r.squared,summary(lm(DeepSmall$log10VIRUS ~ DeepSmall$log10BACTERIA))$r.squared),
+  DeepShallow = c('<=100m', '>100m'),
+  PLX = c(10,10), 
+  PLY = c(.3,.78),
+  TTOX = c(7,10),
+  TTOY = c(-1,-1)
+  )
+
+ints<-c()
+shallowrsqs<-c()
+deeprsqs<-c()
+for (int in seq(0,1.5,length=1000)){
+  deeprsq<- 1-(sum((DeepSmall$log10VIRUS-(int+(DeepSmall$log10BACTERIA)))^2)/
+             sum((DeepSmall$log10VIRUS-mean(DeepSmall$log10VIRUS))^2))
+  shallowrsq<- 1-(sum((smallLabSet$log10VIRUS-(int+(smallLabSet$log10BACTERIA)))^2)/
+             sum((smallLabSet$log10VIRUS-mean(smallLabSet$log10VIRUS))^2))
+  shallowrsqs<-c(shallowrsqs,shallowrsq)
+  deeprsqs<-c(deeprsqs,deeprsq)
+  ints<-c(ints,int)
+}
+df<-data.frame(int = as.numeric(c(ints,ints)), rsq = as.numeric(c(shallowrsqs,deeprsqs)), DeepShallow = c(rep('<=100m',1000),rep('>100m',1000)))
+df$int<-as.numeric(as.character(df$int))
+df$rsq<-as.numeric(as.character(df$rsq))
+
+shallowdeeplinearmods <- ggplot(data=df, aes(x=10^df$int, y=rsq)) +
+  geom_point(size=1,col='steel blue') +
+  facet_grid(. ~ DeepShallow) +
+  geom_hline(yintercept=0, lty=2) +
+  geom_hline(aes(yintercept = powerlawInt), data=ann4) +
+  geom_text(data=ann4,aes(x=PLX,y=PLY,label='Power Law'),show_guide=F,size=6,family="Helvetica", fontface="bold") + 
+  geom_text(data=ann4,aes(x=TTOX,y=TTOY,label='10:1'),show_guide=F,size=6,family="Helvetica", fontface="bold") + 
+  labs(list(x='Fixed VMR', 
+            y = expression(paste("Variance Explained (R"^"2",")"))))+
+  theme(panel.margin = unit(2, "lines"),
+        aspect.ratio=1,
+        strip.background = element_rect(fill="white"),
+        strip.text.x = element_text(size = 16,face="bold"),
+        plot.title=element_text(size=20),
+        axis.text=element_text(size=16),
+        axis.title=element_text(size=16,face="bold"), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.position = c(.15,.8))+
+  scale_y_continuous(breaks = round(sort(c(seq(-5,1, length.out=7), ann4$powerlawInt)),3),
+                     #labels = c(insert_minor(seq(-6,2,by=1),0,0)), 
+                     limits = c(-3,1.1), 
+                     expand = c(0,0))
+shallowdeeplinearmods
+pdf("output/figures/pdf/shallowdeeplinearmods.pdf", width=12, height=8)
+print(shallowdeeplinearmods)
+dev.off()
+
+jpeg("output/figures/jpg/shallowdeeplinearmods.jpg", width=600, height=400)
+print(shallowdeeplinearmods)
+dev.off()
+```
+
+Table of the number of samples taken by study.
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/SMALLLABSET.RData")
+load("output/data/DEEPSMALL.RData")
+shallowpoints<-as.data.frame(table(smallLabSet$Study))
+deeppoints<-as.data.frame(table(DeepSmall$Study))
+allpoints<-as.data.frame(merge(shallowpoints,deeppoints, by = 'Var1'))
+allpoints$total<-allpoints$Freq.x+allpoints$Freq.y
+names(allpoints) <- c("Study", "Shallow","Deep","Total")
+newrow <- data.frame(Study = c('Total'), Shallow = c(sum(allpoints$Shallow)), Deep = c(sum(allpoints$Deep)), Total = c(sum(allpoints$Total)))
+allpoints<-rbind(allpoints,newrow)
+kable(allpoints[,1:4])
+```
+
+Table of percentiles for ensemble of slopes generated by bootstrapping the simple linear regression model
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/SMALLLABSET.RData") 
+
+calcRSQ <- function(obs,pred){
+  ssTotal <- sum((obs-mean(obs))^2)
+  ssResidual <- sum((obs - pred)^2)
+  return(1-(ssResidual/ssTotal))
+}
+
+reps<-100
+powerlawRSQs<-c()
+TenOneRSQs<-c()
+slopes<-mat.or.vec(reps,1)
+slopeavgs<-mat.or.vec(reps,1)
+slopes1<-mat.or.vec(reps,1)
+slopeavgs1<-mat.or.vec(reps,1)
+slopes2<-mat.or.vec(length(levels(factor(smallLabSet$Study))),reps)
+slopeavgs2<-mat.or.vec(length(levels(factor(smallLabSet$Study))),reps)
+set.seed(1984)
+pb <- txtProgressBar(min = 0, max = reps, style = 3)
+for (i in seq(1:reps)){
+  setTxtProgressBar(pb, i)
+  bootstrapset<-data.frame()
+  studies<-c()
+  for (study in levels(factor(smallLabSet$Study))){
+    studies<-c(studies,study)
+    #print(lab)
+    set<-smallLabSet[which(smallLabSet$Study==study),]
+    #print(nrow(set))
+    randomset <- set[sample(nrow(set), nrow(set), replace=T), ]
+    bootstrapset<-rbind(bootstrapset,randomset)
+  }
+  lm<-lm(bootstrapset$log10VIRUS~bootstrapset$log10BACTERIA)
+  clm<-coefficients(lm)
+  clm<-clm[2]
+  slopes[i]<-clm
+  slopeavgs[i]<-mean(slopes[c(1:i)])
+  
+  me<-lmer(bootstrapset$log10VIRUS~bootstrapset$log10BACTERIA + (1|bootstrapset$Study),REML = F)
+  cme<-coefficients(me)
+  cme<-cme[[1]][1,2]
+  slopes1[i]<-cme
+  slopeavgs1[i]<-mean(slopes1[c(1:i)])
+  
+  me1<-lmer(bootstrapset$log10VIRUS~bootstrapset$log10BACTERIA + (bootstrapset$log10BACTERIA|bootstrapset$Study),REML = F)
+  cme1<-coefficients(me1)
+  cme1<-cme1[[1]]
+  
+  for (j in seq(1:nrow(cme1))){
+    slopes2[j,i]<-cme1[j,2]
+    slopeavgs2[j,i]<-mean(slopes2[j,c(1:i)])
+  }
+  
+  powerlawRSQs<-c(powerlawRSQs,summary(lm)$r.squared)
+  TenOneRSQs<-c(TenOneRSQs,calcRSQ(bootstrapset$log10VIRUS,bootstrapset$log10BACTERIA + 1))
+  
+}
+close(pb)
+percentiles<-as.matrix(quantile(slopes,probs=c(.025,.5,.975)))
+colnames(percentiles) <- c("log10BACTERIA")
+
+percentiles1<-as.matrix(quantile(slopes1,probs=c(.025,.5,.975)))
+colnames(percentiles1) <- c("log10BACTERIA")
+
+percentiles2<-mat.or.vec(length(levels(factor(smallLabSet$Study))),3)
+for (j in seq(1:nrow(cme1))){
+  quants<-as.matrix(quantile(slopes2[j,],probs=c(.025,.5,.975)))
+  for (i in seq(1:3)){
+    percentiles2[j,i]<-quants[i]
+  }
+}
+percentiles2<-as.data.frame(percentiles2)
+colnames(percentiles2) <- c("2.5%", "50%","97.5%")
+rownames(percentiles2) <- c("ARCTICSBI","BATS","BEDFORDBASIN","NORTHSEA2001","CASES03-04","ELA","FECYCLE1","FECYCLE2","GEOTRACES","GEOTRACES_LEG3","KH04_5","KH05_2","GREENLAND2012","INDIANOCEAN2006","MOVE","NASB2005","POWOW","RAUNEFJORD2000","SOG","STRATIPHYT1","STRATIPHYT2","SWAT","TABASCO","TROUT","USC MO")
+
+#save(powerlawRSQs, file = "output/data/POWERLAWRSQS.RData")
+#save(TenOneRSQs, file = "output/data/TENONERSQS.RData")
+#save(slopes2, file = "output/data/SLOPES2.RData")
+#save(percentiles2, file = "output/data/SHALLOWPERCENTILES2.RData")
+
+load("output/data/DEEPSMALL.RData")
+slopes<-mat.or.vec(reps,1)
+slopeavgs<-mat.or.vec(reps,1)
+slopes1<-mat.or.vec(reps,1)
+slopeavgs1<-mat.or.vec(reps,1)
+slopes2<-mat.or.vec(length(levels(factor(DeepSmall$Study))),reps)
+slopeavgs2<-mat.or.vec(length(levels(factor(DeepSmall$Study))),reps)
+set.seed(1984)
+pb <- txtProgressBar(min = 0, max = reps, style = 3)
+for (i in seq(1:reps)){
+  setTxtProgressBar(pb, i)
+  bootstrapset<-data.frame()
+  studies<-c()
+  for (study in levels(factor(DeepSmall$Study))){
+    studies<-c(studies,study)
+    #print(lab)
+    set<-DeepSmall[which(DeepSmall$Study==study),]
+    #print(nrow(set))
+    randomset <- set[sample(nrow(set), nrow(set), replace=T), ]
+    bootstrapset<-rbind(bootstrapset,randomset)
+  }
+  lm<-lm(bootstrapset$log10VIRUS~bootstrapset$log10BACTERIA)
+  clm<-coefficients(lm)
+  clm<-clm[2]
+  slopes[i]<-clm
+  slopeavgs[i]<-mean(slopes[c(1:i)])
+  
+  me<-lmer(bootstrapset$log10VIRUS~bootstrapset$log10BACTERIA + (1|bootstrapset$Study),REML = F)
+  cme<-coefficients(me)
+  cme<-cme[[1]][1,2]
+  slopes1[i]<-cme
+  slopeavgs1[i]<-mean(slopes1[c(1:i)])
+  
+  me1<-lmer(bootstrapset$log10VIRUS~bootstrapset$log10BACTERIA + (bootstrapset$log10BACTERIA|bootstrapset$Study),REML = F)
+  cme1<-coefficients(me1)
+  cme1<-cme1[[1]]
+  for (j in seq(1:nrow(cme1))){
+    slopes2[j,i]<-cme1[j,2]
+    slopeavgs2[j,i]<-mean(slopes2[j,c(1:i)])
+  }
+}
+close(pb)
+percentiles<-as.matrix(quantile(slopes,probs=c(.025,.5,.975)))
+colnames(percentiles) <- c("log10BACTERIA")
+
+percentiles1<-as.matrix(quantile(slopes1,probs=c(.025,.5,.975)))
+colnames(percentiles1) <- c("log10BACTERIA")
+
+percentiles2<-mat.or.vec(length(levels(factor(DeepSmall$Study))),3)
+for (j in seq(1:nrow(cme1))){
+  quants<-as.matrix(quantile(slopes2[j,],probs=c(.025,.5,.975)))
+  for (i in seq(1:3)){
+    percentiles2[j,i]<-quants[i]
+  }
+}
+percentiles2<-as.data.frame(percentiles2)
+colnames(percentiles2) <- c("2.5%", "50%","97.5%")
+rownames(percentiles2) <- c("BATS","NORTHSEA2001","CASES03-04","GEOTRACES","GEOTRACES_LEG3","KH04_5","KH05_2","GREENLAND2012","INDIANOCEAN2006", "STRATIPHYT1","STRATIPHYT2","USC MO")
+#kable(percentiles2)
+
+deepslopes2<-slopes2
+#save(deepslopes2, file = "output/data/DEEPSLOPES2.RData")
+deeppercentiles2<-percentiles2
+#save(deeppercentiles2, file = "output/data/DEEPPERCENTILES2.RData")
+
+```
+
+Create a scatterplot of all data with the study-specific scatterplots following
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/SMALLLABSET.RData")  
+ARCTICSBI<-smallLabSet[which(smallLabSet$Study == 'ARCTICSBI'),]
+FECYCLE2<-smallLabSet[which(smallLabSet$Study == 'FECYCLE2'),]
+STRATAPHYT1<-smallLabSet[which(smallLabSet$Study == 'STRATIPHYT1'),]
+MOVE<-smallLabSet[which(smallLabSet$Study == 'MOVE'),]
+FECYCLE1<-smallLabSet[which(smallLabSet$Study == 'FECYCLE1'),]
+USCMO<-smallLabSet[which(smallLabSet$Study == 'USC MO'),]
+RAUNEFJORD2000<-smallLabSet[which(smallLabSet$Study == 'RAUNEFJORD2000'),]
+KH05_2<-smallLabSet[which(smallLabSet$Study == 'KH05_2'),]
+POWOW<-smallLabSet[which(smallLabSet$Study == 'POWOW'),]
+GEOTRACES<-smallLabSet[which(smallLabSet$Study == 'GEOTRACES'),]
+STRATAPHYT2<-smallLabSet[which(smallLabSet$Study == 'STRATIPHYT2'),]
+SOG<-smallLabSet[which(smallLabSet$Study == 'SOG'),]
+CASES0304<-smallLabSet[which(smallLabSet$Study == 'CASES03-04'),]
+KH04_5<-smallLabSet[which(smallLabSet$Study == 'KH04_5'),]
+GEOTRACES_LEG3<-smallLabSet[which(smallLabSet$Study == 'GEOTRACES_LEG3'),]
+BEDFORDBASIN<-smallLabSet[which(smallLabSet$Study == 'BEDFORDBASIN'),]
+SWAT<-smallLabSet[which(smallLabSet$Study == 'SWAT'),]
+BATS<-smallLabSet[which(smallLabSet$Study == 'BATS'),]
+GREENLAND2012<-smallLabSet[which(smallLabSet$Study == 'GREENLAND2012'),]
+NORTHSEA2001<-smallLabSet[which(smallLabSet$Study == 'NORTHSEA2001'),]
+INDIANOCEAN2006<-smallLabSet[which(smallLabSet$Study == 'INDIANOCEAN2006'),]
+TABASCO<-smallLabSet[which(smallLabSet$Study == 'TABASCO'),]
+TROUT<-smallLabSet[which(smallLabSet$Study == 'TROUT'),]
+ELA<-smallLabSet[which(smallLabSet$Study == 'ELA'),]
+NASB2005<-smallLabSet[which(smallLabSet$Study == 'NASB2005'),]
+save(ARCTICSBI, file = "output/data/ARCTICSBI.RData")
+save(FECYCLE2, file = "output/data/FECYCLE2.RData")
+save(STRATAPHYT1, file = "output/data/STRATAPHYT1.RData")
+save(MOVE, file = "output/data/MOVE.RData")
+save(FECYCLE1, file = "output/data/FECYCLE1.RData")
+save(USCMO, file = "output/data/USCMO.RData")
+save(RAUNEFJORD2000, file = "output/data/RAUNEFJORD2000.RData")
+save(KH05_2, file = "output/data/KH05_2.RData")
+save(POWOW, file = "output/data/POWOW.RData")
+save(GEOTRACES, file = "output/data/GEOTRACES.RData")
+save(STRATAPHYT2, file = "output/data/STRATAPHYT2.RData")
+save(SOG, file = "output/data/SOG.RData")
+save(CASES0304, file = "output/data/CASES0304.RData")
+save(KH04_5, file = "output/data/KH04_5.RData")
+save(GEOTRACES_LEG3, file = "output/data/GEOTRACES_LEG3.RData") 
+save(BEDFORDBASIN, file = "output/data/BEDFORDBASIN.RData")
+save(SWAT, file = "output/data/SWAT.RData")
+save(BATS, file = "output/data/BATS.RData")
+save(GREENLAND2012, file = "output/data/GREENLAND2012.RData")
+save(NORTHSEA2001, file = "output/data/NORTHSEA2001.RData")
+save(INDIANOCEAN2006, file = "output/data/INDIANOCEAN2006.RData")
+save(TABASCO, file = "output/data/TABASCO.RData")
+save(TROUT, file = "output/data/TROUT.RData")
+save(ELA, file = "output/data/ELA.RData")
+save(NASB2005, file = "output/data/NASB2005.RData")
+```
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/ARCTICSBI.RData")
+load("output/data/FECYCLE2.RData")
+load("output/data/STRATAPHYT1.RData")
+load("output/data/MOVE.RData")
+load("output/data/FECYCLE1.RData")
+load("output/data/USCMO.RData")
+load("output/data/RAUNEFJORD2000.RData")
+load("output/data/KH05_2.RData")
+load("output/data/POWOW.RData")
+load("output/data/GEOTRACES.RData")
+load("output/data/STRATAPHYT2.RData")
+load("output/data/SOG.RData")
+load("output/data/CASES0304.RData")
+load("output/data/KH04_5.RData")
+load("output/data/GEOTRACES_LEG3.RData") 
+load("output/data/BEDFORDBASIN.RData")
+load("output/data/SWAT.RData")
+load("output/data/BATS.RData")
+load("output/data/GREENLAND2012.RData")
+load("output/data/NORTHSEA2001.RData")
+load("output/data/INDIANOCEAN2006.RData")
+load("output/data/TABASCO.RData")
+load("output/data/TROUT.RData")
+load("output/data/ELA.RData")
+load("output/data/NASB2005.RData")
+load("output/data/SMALLLABSET.RData")
+m1<-lm(smallLabSet$log10VIRUS ~ smallLabSet$log10BACTERIA)
+fm2<-lme(log10VIRUS~log10BACTERIA, random=~1+log10BACTERIA|Study,data=smallLabSet)
+graphSmall<-function(dataset){
+    main <- deparse(substitute(dataset))
+    OBJ<-ggplot(dataset, aes(x=log10BACTERIA, y=log10VIRUS)) +
+      geom_point(size=1, alpha = 1, col='steelblue') +
+      labs(list(x='', y='', title=main))+
+      geom_smooth(method='lm', se=F,size=.75,col='blue') +
+      geom_abline(intercept=1, slope=1, col='black', size=.85, alpha=.3) +
+      geom_abline(intercept=coef(m1)[[1]], slope=coef(m1)[[2]], col='#D55E00', size=.75, alpha=.5) +
+      theme(aspect.ratio=1,
+            title = element_text(size=8),
+            axis.text=element_text(size=0),
+            axis.title=element_text(size=0,face="bold"),
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            panel.background = element_blank(),
+            axis.line = element_blank(),
+            axis.ticks = element_blank(),
+            legend.position = "NONE") +
+      scale_x_continuous(#breaks = c(seq(4.5,9,by=.25)), 
+        limits = c(min(smallLabSet$log10BACTERIA)-.1,max(smallLabSet$log10BACTERIA)+.1), 
+        expand = c(0,0)) +
+      scale_y_continuous(#breaks = c(seq(5.5,9,by=.25)), 
+        limits = c(min(smallLabSet$log10VIRUS)-.1,max(smallLabSet$log10VIRUS)+.1), 
+        expand = c(0,0))
+    return(OBJ)
+  }
+
+graphSmall1<-function(dataset){
+  main <- deparse(substitute(dataset))
+  OBJ<-ggplot(dataset, aes(x=log10BACTERIA, y=log10VIRUS)) +
+    geom_point(size=1, alpha = 1, col='steelblue') +
+    labs(list(x='', y='', title=main))+
+    geom_abline(intercept=1, slope=1, col='black', size=.85, alpha=.3) +
+    geom_abline(intercept=coef(m1)[[1]], slope=coef(m1)[[2]], col='#D55E00', size=.75, alpha=.5) +
+    geom_smooth(method='lm', se=F,size=.75,col='blue') +
+    theme(aspect.ratio=1,
+          title = element_text(size=8),
+          axis.text.x=element_text(size=0),
+          axis.text.y=element_text(size=6),
+          axis.title=element_text(size=0,face="bold"),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(),
+          axis.line = element_line(colour = "black"),
+          legend.position = c(.13,.75),
+          legend.key = element_rect(fill = "white"),
+          axis.line.x = element_blank(),
+          axis.ticks.x = element_blank(),
+          legend.key.size = unit(.5, "cm")) +
+    scale_x_continuous(breaks = c(seq(4,9,by=1)), 
+                       labels = c(insert_minor(seq(4,9,by=1),0,0)), 
+                       limits = c(min(smallLabSet$log10BACTERIA)-.1,max(smallLabSet$log10BACTERIA)+.1), 
+                       expand = c(0,0)) +
+    scale_y_continuous(breaks = c(seq(5,9,by=1)), 
+                       labels = c(insert_minor(seq(5,9,by=1),0,0)), 
+                       limits = c(min(smallLabSet$log10VIRUS)-.1,max(smallLabSet$log10VIRUS)+.1), 
+                       expand = c(0,0))
+  return(OBJ)
+}
+
+graphSmall2<-function(dataset){
+  main <- deparse(substitute(dataset))
+  OBJ<-ggplot(dataset, aes(x=log10BACTERIA, y=log10VIRUS)) +
+    geom_point(size=1, alpha = 1, col='steelblue') +
+    labs(list(x='', y='', title=main))+
+    geom_abline(intercept=1, slope=1, col='black', size=.85, alpha=.3) +
+    geom_abline(intercept=coef(m1)[[1]], slope=coef(m1)[[2]], col='#D55E00', size=.75, alpha=.5) +
+    geom_smooth(method='lm', se=F,size=.75,col='blue') +
+    theme(aspect.ratio=1,
+          title = element_text(size=8),
+          axis.text.y=element_text(size=0),
+          axis.text.x=element_text(size=6),
+          axis.title=element_text(size=2,face="bold"),
+          #text = element_text(size=32),aspect.ratio=1,
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(),
+          axis.line = element_line(colour = "black"),
+          legend.position = c(.13,.75),
+          legend.key = element_rect(fill = "white"),
+          axis.line.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          legend.key.size = unit(.5, "cm")) +
+    scale_x_continuous(breaks = c(seq(4,9,by=1)), 
+                       labels = c(insert_minor(seq(4,9,by=1),0,0)), 
+                       limits = c(min(smallLabSet$log10BACTERIA)-.1,max(smallLabSet$log10BACTERIA)+.1), 
+                       expand = c(0,0)) +
+    scale_y_continuous(breaks = c(seq(5,9,by=1)), 
+                       labels = c(insert_minor(seq(5,9,by=1),0,0)), 
+                       limits = c(min(smallLabSet$log10VIRUS)-.1,max(smallLabSet$log10VIRUS)+.1), 
+                       expand = c(0,0))
+  return(OBJ)
+}
+
+graphSmall3<-function(dataset){
+  main <- deparse(substitute(dataset))
+  OBJ<-ggplot(dataset, aes(x=log10BACTERIA, y=log10VIRUS)) +
+    geom_point(size=1, alpha = 1, col='steelblue') +
+    labs(list(x='', y='', title=main))+
+    geom_abline(intercept=1, slope=1, col='black', size=.85, alpha=.3) +
+    geom_abline(intercept=coef(m1)[[1]], slope=coef(m1)[[2]], col='#D55E00', size=.75, alpha=.5) +
+    geom_smooth(method='lm', se=F,size=.75,col='blue') +
+    theme(aspect.ratio=1,
+          title = element_text(size=8),
+          axis.text.y=element_text(size=6),
+          axis.text.x=element_text(size=6),
+          axis.title=element_text(size=2,face="bold"),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(),
+          axis.line = element_line(colour = "black"),
+          legend.position = c(.13,.75),
+          legend.key = element_rect(fill = "white"),
+          legend.key.size = unit(.5, "cm")) +
+    scale_x_continuous(breaks = c(seq(4,9,by=1)), 
+                       labels = c(insert_minor(seq(4,9,by=1),0,0)), 
+                       limits = c(min(smallLabSet$log10BACTERIA)-.1,max(smallLabSet$log10BACTERIA)+.1), 
+                       expand = c(0,0)) +
+    scale_y_continuous(breaks = c(seq(5,9,by=1)), 
+                       labels = c(insert_minor(seq(5,9,by=1),0,0)), 
+                       limits = c(min(smallLabSet$log10VIRUS)-.1,max(smallLabSet$log10VIRUS)+.1), 
+                       expand = c(0,0))
+  return(OBJ)
+}
+
+
+
+fig21a.1 <- ggplot(smallLabSet, aes(x=log10BACTERIA, y=log10VIRUS)) +
+  geom_point(size=.01, alpha = .01) + 
+  geom_line(aes(y=predict(fm2), group=Study), size=.25, alpha = 1, col="blue") +
+  labs(list(x=expression('Microbes per mL (log'[10]*')'), 
+            y=expression('Viruses per mL (log'[10]*')'))) +
+  geom_abline(intercept=1, slope=1, col='black', size=2, alpha=.3) +
+  geom_abline(intercept=coef(m1)[[1]], slope=coef(m1)[[2]], col='#D55E00', size=2, alpha=.5) +
+  annotate(size=4,family="Helvetica", fontface="bold",geom="text",x = 6.75, y = 6.95, label = "Power Law", parse = F) + 
+  annotate(size=4,family="Helvetica", fontface="bold",geom="text",x = 6.65, y = 7.95, label = as.character(paste("10","1",sep=":")), parse = F) +      
+  theme(aspect.ratio=1,
+        title = element_text(size=9),
+        axis.text=element_text(size=7),
+        axis.title=element_text(size=7,face="bold"),
+        aspect.ratio=1,
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.position = 'NONE',
+        legend.key = element_rect(fill = "white"),
+        legend.key.size = unit(.5, "cm")) +
+  scale_x_continuous(breaks = c(seq(4.5,9,by=.25)), 
+                     labels = c(insert_minor(seq(4.5,9,by=.5),1,1)), 
+                     limits = c(min(smallLabSet$log10BACTERIA)-.1,max(smallLabSet$log10BACTERIA)+.1), 
+                     expand = c(0,0)) +
+  scale_y_continuous(breaks = c(seq(5.5,9,by=.25)), 
+                     labels = c(insert_minor(seq(5.5,9,by=.5),1,1)), 
+                     limits = c(min(smallLabSet$log10VIRUS)-.1,max(smallLabSet$log10VIRUS)+.1), 
+                     expand = c(0,0)) 
+
+WIDTH<-7.5
+HEIGHT<-9
+vp1 <- viewport(width = 4.2/10, height = 4.3/12, x = 2/10, y = 10.1/12)
+vp2 <- viewport(width = 3/10, height = 2.4 /12, x = 5/10, y = 11/12)
+vp3 <- viewport(width = 3/10, height = 2.4/12, x = 7/10, y = 11/12)
+vp4 <- viewport(width = 3/10, height = 2.4/12, x = 9/10, y = 11/12)
+vp5 <- viewport(width = 3/10, height = 2.4/12, x = 5/10, y = 9/12)
+vp6 <- viewport(width = 3/10, height = 2.4/12, x = 7/10, y = 9/12)
+vp7 <- viewport(width = 3/10, height = 2.4/12, x = 9/10, y = 9/12)
+vp8 <- viewport(width = 3/10, height = 2.4/12, x = 1/10, y = 7/12)
+vp9 <- viewport(width = 3/10, height = 2.4/12, x = 3/10, y = 7/12)
+vp10 <- viewport(width = 3/10, height = 2.4/12, x = 5/10, y = 7/12)
+vp11 <- viewport(width = 3/10, height = 2.4/12, x = 7/10, y = 7/12)
+vp12 <- viewport(width = 3/10, height = 2.4/12, x = 9/10, y = 7/12)
+vp13 <- viewport(width = 3/10, height = 2.4/12, x = 1/10, y = 5/12)
+vp14 <- viewport(width = 3/10, height = 2.4/12, x = 3/10, y = 5/12)
+vp15 <- viewport(width = 3/10, height = 2.4/12, x = 5/10, y = 5/12)
+vp16 <- viewport(width = 3/10, height = 2.4/12, x = 7/10, y = 5/12)
+vp17 <- viewport(width = 3/10, height = 2.4/12, x = 9/10, y = 5/12)
+vp18 <- viewport(width = 3/10, height = 2.4/12, x = 1/10, y = 3/12)
+vp19 <- viewport(width = 3/10, height = 2.4/12, x = 3/10, y = 3/12)
+vp20 <- viewport(width = 3/10, height = 2.4/12, x = 5/10, y = 3/12)
+vp21 <- viewport(width = 3/10, height = 2.4/12, x = 7/10, y = 3/12)
+vp22 <- viewport(width = 3/10, height = 2.4/12, x = 9/10, y = 3/12)
+vp23 <- viewport(width = 3/10, height = 2.4/12, x = 1/10, y = 1/12)
+vp24 <- viewport(width = 3/10, height = 2.4/12, x = 3/10, y = 1/12)
+vp25 <- viewport(width = 3/10, height = 2.4/12, x = 5/10, y = 1/12)
+vp26 <- viewport(width = 3/10, height = 2.4/12, x = 7/10, y = 1/12)
+vp27 <- viewport(width = 3/10, height = 2.4/12, x = 9/10, y = 1/12)
+grid.newpage()
+pushViewport(viewport(layout = grid.layout(6,5)))
+
+pdf("output/figures/pdf/scatterplots_by_study.pdf", width=8, height=8)
+print(fig21a.1, vp = vp1)
+print(graphSmall1(ARCTICSBI), vp = vp2)
+print(graphSmall(BATS), vp = vp3)
+print(graphSmall(BEDFORDBASIN), vp = vp4)
+print(graphSmall1(CASES0304), vp = vp5)
+print(graphSmall(ELA), vp = vp6)
+print(graphSmall(FECYCLE1), vp = vp7)
+print(graphSmall1(FECYCLE2), vp = vp8)
+print(graphSmall(GEOTRACES), vp = vp9)
+print(graphSmall(GEOTRACES_LEG3), vp = vp10)
+print(graphSmall(GREENLAND2012), vp = vp11)
+print(graphSmall(INDIANOCEAN2006), vp = vp12)
+print(graphSmall1(KH04_5), vp = vp13)
+print(graphSmall(KH05_2), vp = vp14)
+print(graphSmall(MOVE), vp = vp15)
+print(graphSmall(NASB2005), vp = vp16)
+print(graphSmall(NORTHSEA2001), vp = vp17)
+print(graphSmall1(POWOW), vp = vp18)
+print(graphSmall(RAUNEFJORD2000), vp = vp19)
+print(graphSmall(SOG), vp = vp20)
+print(graphSmall(STRATAPHYT1), vp = vp21)
+print(graphSmall2(STRATAPHYT2), vp = vp22)
+print(graphSmall3(SWAT), vp = vp23)
+print(graphSmall2(TABASCO), vp = vp24)
+print(graphSmall2(TROUT), vp = vp25)
+print(graphSmall2(USCMO), vp = vp26)
+dev.off()
+
+jpeg("output/figures/jpg/scatterplots_by_study.jpg", width=600, height=600)
+print(fig21a.1, vp = vp1)
+print(graphSmall1(ARCTICSBI), vp = vp2)
+print(graphSmall(BATS), vp = vp3)
+print(graphSmall(BEDFORDBASIN), vp = vp4)
+print(graphSmall1(CASES0304), vp = vp5)
+print(graphSmall(ELA), vp = vp6)
+print(graphSmall(FECYCLE1), vp = vp7)
+print(graphSmall1(FECYCLE2), vp = vp8)
+print(graphSmall(GEOTRACES), vp = vp9)
+print(graphSmall(GEOTRACES_LEG3), vp = vp10)
+print(graphSmall(GREENLAND2012), vp = vp11)
+print(graphSmall(INDIANOCEAN2006), vp = vp12)
+print(graphSmall1(KH04_5), vp = vp13)
+print(graphSmall(KH05_2), vp = vp14)
+print(graphSmall(MOVE), vp = vp15)
+print(graphSmall(NASB2005), vp = vp16)
+print(graphSmall(NORTHSEA2001), vp = vp17)
+print(graphSmall1(POWOW), vp = vp18)
+print(graphSmall(RAUNEFJORD2000), vp = vp19)
+print(graphSmall(SOG), vp = vp20)
+print(graphSmall(STRATAPHYT1), vp = vp21)
+print(graphSmall(STRATAPHYT2), vp = vp22)
+print(graphSmall3(SWAT), vp = vp23)
+print(graphSmall2(TABASCO), vp = vp24)
+print(graphSmall2(TROUT), vp = vp25)
+print(graphSmall2(USCMO), vp = vp26)
+dev.off()
+```
+
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/DEEPSMALL.RData")
+m1<-lm(DeepSmall$log10VIRUS ~ DeepSmall$log10BACTERIA)
+graphSmall<-function(dataset){
+  main <- deparse(substitute(dataset))
+  OBJ<-ggplot(dataset, aes(x=log10BACTERIA, y=log10VIRUS)) +
+    geom_point(size=1, alpha = 1, col='steelblue') +
+    labs(list(x='', y='', title=main))+
+    geom_smooth(method='lm', se=F,size=.75,col='blue') +
+    geom_abline(intercept=1, slope=1, col='black', size=.85, alpha=.3) +
+    geom_abline(intercept=coef(m1)[[1]], slope=coef(m1)[[2]], col='#D55E00', size=.75, alpha=.5) +
+    theme(aspect.ratio=1,
+          title = element_text(size=8),
+          axis.text=element_text(size=0),
+          axis.title=element_text(size=0,face="bold"),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(),
+          axis.line = element_blank(),
+          axis.ticks = element_blank(),
+          legend.position = "NONE") +
+    scale_x_continuous(#breaks = c(seq(4.5,9,by=.25)),
+      limits = c(min(DeepSmall$log10BACTERIA)-.1,max(DeepSmall$log10BACTERIA)+.1),
+      expand = c(0,0)) +
+    scale_y_continuous(#breaks = c(seq(5.5,9,by=.25)),
+      limits = c(min(DeepSmall$log10VIRUS)-.1,max(DeepSmall$log10VIRUS)+.1),
+      expand = c(0,0))
+  return(OBJ)
+}
+
+graphSmall1<-function(dataset){
+  main <- deparse(substitute(dataset))
+  OBJ<-ggplot(dataset, aes(x=log10BACTERIA, y=log10VIRUS)) +
+    geom_point(size=1, alpha = 1, col='steelblue') +
+    labs(list(x='', y='', title=main))+
+    geom_abline(intercept=1, slope=1, col='black', size=.85, alpha=.3) +
+    geom_abline(intercept=coef(m1)[[1]], slope=coef(m1)[[2]], col='#D55E00', size=.75, alpha=.5) +
+    geom_smooth(method='lm', se=F,size=.75,col='blue') +
+    theme(aspect.ratio=1,
+          title = element_text(size=8),
+          axis.text.x=element_text(size=0),
+          axis.text.y=element_text(size=6),
+          axis.title=element_text(size=0,face="bold"),
+          #text = element_text(size=32),aspect.ratio=1,
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(),
+          axis.line = element_line(colour = "black"),
+          legend.position = c(.13,.75),
+          legend.key = element_rect(fill = "white"),
+          axis.line.x = element_blank(),
+          axis.ticks.x = element_blank(),
+          legend.key.size = unit(.5, "cm")) +
+    scale_x_continuous(breaks = c(seq(4,9,by=1)),
+                       labels = c(insert_minor(seq(4,9,by=1),0,0)),
+                       limits = c(min(DeepSmall$log10BACTERIA)-.1,max(DeepSmall$log10BACTERIA)+.1),
+                       expand = c(0,0)) +
+    scale_y_continuous(breaks = c(seq(5,9,by=1)),
+                       labels = c(insert_minor(seq(5,9,by=1),0,0)),
+                       limits = c(min(DeepSmall$log10VIRUS)-.1,max(DeepSmall$log10VIRUS)+.1),
+                       expand = c(0,0))
+  return(OBJ)
+}
+
+graphSmall2<-function(dataset){
+  main <- deparse(substitute(dataset))
+  OBJ<-ggplot(dataset, aes(x=log10BACTERIA, y=log10VIRUS)) +
+    geom_point(size=1, alpha = 1, col='steelblue') +
+    labs(list(x='', y='', title=main))+
+    geom_abline(intercept=1, slope=1, col='black', size=.85, alpha=.3) +
+    geom_abline(intercept=coef(m1)[[1]], slope=coef(m1)[[2]], col='#D55E00', size=.75, alpha=.5) +
+    geom_smooth(method='lm', se=F,size=.75,col='blue') +
+    theme(aspect.ratio=1,
+          title = element_text(size=8),
+          axis.text.y=element_text(size=0),
+          axis.text.x=element_text(size=6),
+          axis.title=element_text(size=2,face="bold"),
+          #text = element_text(size=32),aspect.ratio=1,
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(),
+          axis.line = element_line(colour = "black"),
+          legend.position = c(.13,.75),
+          legend.key = element_rect(fill = "white"),
+          axis.line.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          legend.key.size = unit(.5, "cm")) +
+    scale_x_continuous(breaks = c(seq(4,9,by=1)),
+                       labels = c(insert_minor(seq(4,9,by=1),0,0)),
+                       limits = c(min(DeepSmall$log10BACTERIA)-.1,max(DeepSmall$log10BACTERIA)+.1),
+                       expand = c(0,0)) +
+    scale_y_continuous(breaks = c(seq(5,9,by=1)),
+                       labels = c(insert_minor(seq(5,9,by=1),0,0)),
+                       limits = c(min(DeepSmall$log10VIRUS)-.1,max(DeepSmall$log10VIRUS)+.1),
+                       expand = c(0,0))
+  return(OBJ)
+}
+
+graphSmall3<-function(dataset){
+  main <- deparse(substitute(dataset))
+  OBJ<-ggplot(dataset, aes(x=log10BACTERIA, y=log10VIRUS)) +
+    geom_point(size=1, alpha = 1, col='steelblue') +
+    labs(list(x='', y='', title=main))+
+    geom_abline(intercept=1, slope=1, col='black', size=.85, alpha=.3) +
+    geom_abline(intercept=coef(m1)[[1]], slope=coef(m1)[[2]], col='#D55E00', size=.75, alpha=.5) +
+    geom_smooth(method='lm', se=F,size=.75,col='blue') +
+    theme(aspect.ratio=1,
+          title = element_text(size=8),
+          axis.text.y=element_text(size=6),
+          axis.text.x=element_text(size=6),
+          axis.title=element_text(size=2,face="bold"),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(),
+          axis.line = element_line(colour = "black"),
+          legend.position = c(.13,.75),
+          legend.key = element_rect(fill = "white"),
+          legend.key.size = unit(.5, "cm")) +
+    scale_x_continuous(breaks = c(seq(4,9,by=1)),
+                       labels = c(insert_minor(seq(4,9,by=1),0,0)),
+                       limits = c(min(DeepSmall$log10BACTERIA)-.1,max(DeepSmall$log10BACTERIA)+.1),
+                       expand = c(0,0)) +
+    scale_y_continuous(breaks = c(seq(5,9,by=1)),
+                       labels = c(insert_minor(seq(5,9,by=1),0,0)),
+                       limits = c(min(DeepSmall$log10VIRUS)-.1,max(DeepSmall$log10VIRUS)+.1),
+                       expand = c(0,0))
+  return(OBJ)
+}
+
+fm2<-lme(log10VIRUS~log10BACTERIA, random=~1+log10BACTERIA|Study,data=DeepSmall)
+
+fig21a.1 <- ggplot(DeepSmall, aes(x=log10BACTERIA, y=log10VIRUS)) +
+  geom_point(size=.01, alpha = .01) +
+  geom_line(aes(y=predict(fm2), group=Study), size=.25, alpha = 1, col="blue") +
+  labs(list(x=expression('Microbes per mL (log'[10]*')'),
+            y=expression('Viruses per mL (log'[10]*')'))) +
+  geom_abline(intercept=1, slope=1, col='black', size=2, alpha=.3) +
+  geom_abline(intercept=coef(m1)[[1]], slope=coef(m1)[[2]], col='#D55E00', size=2, alpha=.5) +
+  annotate(size=4,family="Helvetica", fontface="bold",geom="text",x = 4.1, y = 6.1, label = 'Power\nLaw', parse = F) +
+  annotate(size=4,family="Helvetica", fontface="bold",geom="text",x = 5.7, y = 7.0, label = "10:1", parse = F) +
+  theme(aspect.ratio=1,
+        title = element_text(size=9),
+        axis.text=element_text(size=7),
+        axis.title=element_text(size=7,face="bold"),
+        aspect.ratio=1,
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.position = 'NONE',
+        legend.key = element_rect(fill = "white"),
+        legend.key.size = unit(.5, "cm")) +
+  scale_x_continuous(breaks = c(seq(3,9,by=.25)),
+                     labels = c(insert_minor(seq(3,9,by=.5),1,1)),
+                     expand = c(0,0)) +
+  scale_y_continuous(breaks = c(seq(3,9,by=.25)),
+                     labels = c(insert_minor(seq(3,9,by=.5),1,1)),
+                     expand = c(0,0))
+
+vp1 <- viewport(width = 4.2/8, height = 4.3/10, x = 2/10, y = 10.1/12)
+vp2 <- viewport(width = 2/8, height = 2/10, x = 1/8, y = 5/10)
+vp3 <- viewport(width = 2/8, height = 2/10, x = 3/8, y = 5/10)
+vp4 <- viewport(width = 2/8, height = 2/10, x = 5/8, y = 5/10)
+vp5 <- viewport(width = 2/8, height = 2/10, x = 7/8, y = 5/10)
+vp6 <- viewport(width = 2/8, height = 2/10, x = 1/8, y = 3/10)
+vp7 <- viewport(width = 2/8, height = 2/10, x = 3/8, y = 3/10)
+vp8 <- viewport(width = 2/8, height = 2/10, x = 5/8, y = 3/10)
+vp9 <- viewport(width = 2/8, height = 2/10, x = 7/8, y = 3/10)
+vp10 <- viewport(width = 2/8, height = 2/10, x = 1/8, y = 1/10)
+vp11 <- viewport(width = 2/8, height = 2/10, x = 3/8, y = 1/10)
+vp12 <- viewport(width = 2/8, height = 2/10, x = 5/8, y = 1/10)
+vp13 <- viewport(width = 2/8, height = 2/10, x = 7/8, y = 1/10)
+
+load("output/data/BATS.RData")
+load("output/data/CASES0304.RData")
+load("output/data/GEOTRACES.RData")
+load("output/data/GEOTRACES_LEG3.RData")
+load("output/data/GREENLAND2012.RData")
+load("output/data/INDIANOCEAN2006.RData")
+load("output/data/KH04_5.RData")
+load("output/data/KH05_2.RData")
+load("output/data/NORTHSEA2001.RData")
+load("output/data/STRATAPHYT1.RData")
+load("output/data/STRATAPHYT2.RData")
+load("output/data/USCMO.RData")
+
+grid.newpage()
+pushViewport(viewport(layout = grid.layout(6,5)))
+pdf("output/figures/pdf/deepscatterplots_by_study.pdf", width=8, height=8)
+print(fig21a.1, vp = vp1)
+print(graphSmall1(BATS), vp = vp2)
+print(graphSmall(CASES0304), vp = vp3)
+print(graphSmall(GEOTRACES), vp = vp4)
+print(graphSmall(GEOTRACES_LEG3), vp = vp5)
+print(graphSmall1(GREENLAND2012), vp = vp6)
+print(graphSmall(INDIANOCEAN2006), vp = vp7)
+print(graphSmall(KH04_5), vp = vp8)
+print(graphSmall(KH05_2), vp = vp9)
+print(graphSmall3(NORTHSEA2001), vp = vp10)
+print(graphSmall2(STRATAPHYT1), vp = vp11)
+print(graphSmall2(STRATAPHYT2), vp = vp12)
+print(graphSmall2(USCMO), vp = vp13)
+dev.off()
+
+jpeg("output/figures/jpg/deepscatterplots_by_study.jpg", width=600, height=600)
+print(fig21a.1, vp = vp1)
+print(graphSmall1(BATS), vp = vp2)
+print(graphSmall(CASES0304), vp = vp3)
+print(graphSmall(GEOTRACES), vp = vp4)
+print(graphSmall(GEOTRACES_LEG3), vp = vp5)
+print(graphSmall1(GREENLAND2012), vp = vp6)
+print(graphSmall(INDIANOCEAN2006), vp = vp7)
+print(graphSmall(KH04_5), vp = vp8)
+print(graphSmall(KH05_2), vp = vp9)
+print(graphSmall3(NORTHSEA2001), vp = vp10)
+print(graphSmall2(STRATAPHYT1), vp = vp11)
+print(graphSmall2(STRATAPHYT2), vp = vp12)
+print(graphSmall2(USCMO), vp = vp13)
+dev.off()
+
+```
+
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/SMALLLABSET.RData")
+load("output/data/SLOPES2.RData")
+load("output/data/TOTAL1.RData")
+#load("output/data/RSQFITS.RDATA")
+
+insert_minor <- function(major_labs, n_minor,blanks) {labs <- 
+                              c( sapply( major_labs, function(x) c(x, rep("", blanks) ) ) )
+                              labs[1:(length(labs)-n_minor)]}
+
+lme2<-lme(log10VIRUS~log10BACTERIA, random=~1+log10BACTERIA|Study,data=smallLabSet)
+ls2<-summary(lme2)
+studies<-levels(smallLabSet$Study)
+rsqs<-c()
+studycol<-c()
+pvals<-c()
+for (i in seq(1:length(levels(smallLabSet$Study)))){
+  sub<-smallLabSet[which(smallLabSet$Study == studies[i]),]
+  foo <- sub[, c('log10VIRUS','log10BACTERIA')] 
+  mod<-lm(sub$log10VIRUS ~ sub$log10BACTERIA)
+  foo$yhat <- (sub$log10BACTERIA*coef(mod)[2])+coef(mod)[1]
+  foo$e <- foo$log10VIRUS - foo$yhat
+  SST <- sum( (foo$log10VIRUS - mean(foo$log10VIRUS))^2 )
+  SSC <- sum( (foo$e)^2 )
+  (SST-SSC)/SST
+  studycol<-c(studycol,studies[i])
+  rsqs<-c(rsqs,round((SST-SSC)/SST,3))
+  summary<-summary(mod)
+  pval<-summary$coefficients[2,4]
+  pvals<-c(pvals,as.numeric(format(pval, scientific = TRUE, digits = 3)))
+}
+rsqfits<-as.data.frame(cbind(Study=studycol,RSQ=rsqs,'P-Value'=pvals),rownames=F)
+
+
+fm2<-lme(log10VIRUS~log10BACTERIA, random=~1+log10BACTERIA|Study,data=smallLabSet)
+slopes<-as.data.frame(cbind(study=levels(factor(smallLabSet$Study)),slope=as.vector(coef(fm2)[,2])))
+slopes$study <- factor(slopes$study, levels = slopes$study[order(slopes$slope)])
+smallLabSet$Study <- factor(smallLabSet$Study, levels = rev(slopes$study[order(slopes$slope)]))
+
+slopes2a<-as.data.frame(cbind(sort(levels(factor(smallLabSet$Study))),slopes2))
+i <- sapply(slopes2a, is.factor)
+slopes2a[i] <- lapply(slopes2a[i], as.character)
+slopes2b<-melt(slopes2a, id.vars=c("V1"))
+slopes2b<-as.data.frame(slopes2b)
+x<-as.data.frame(cbind(as.character(slopes2b$V1),as.numeric(as.character(slopes2b$value))))
+x$Study<-factor(x$V1)
+x$slopes<-as.numeric(as.character(x$V2))
+oind <- order(as.numeric(by(x$slopes, x$Study, median)))   
+x$Study <- ordered(x$Study, levels=levels(x$Study)[oind])  
+
+total2 <- total1[rev(order(total1$Freq)),]
+
+smallLabSet1<-smallLabSet
+smallLabSet1$Study <- factor(smallLabSet1$Study, levels = c("POWOW","TABASCO","FECYCLE2","FECYCLE1","NASB2005","SWAT","INDIANOCEAN2006","TROUT","STRATIPHYT2","SOG","GEOTRACES_LEG3","GREENLAND2012","MOVE","ELA","STRATIPHYT1","RAUNEFJORD2000","KH05_2","GEOTRACES","KH04_5","NORTHSEA2001","USC MO","BEDFORDBASIN","CASES03-04","ARCTICSBI","BATS"))
+
+x1<-x
+x1$Study <- factor(x$Study, levels = c("POWOW","TABASCO","FECYCLE2","FECYCLE1","NASB2005","SWAT","INDIANOCEAN2006","TROUT","STRATIPHYT2","SOG","GEOTRACES_LEG3","GREENLAND2012","MOVE","ELA","STRATIPHYT1","RAUNEFJORD2000","KH05_2","GEOTRACES","KH04_5","NORTHSEA2001","USC MO","BEDFORDBASIN","CASES03-04","ARCTICSBI","BATS"))
+
+rsqtable<-rsqfits[order(as.numeric(format(pvals, scientific = TRUE, digits = 3))),]
+rsqtable$labelcolor<-ifelse(as.numeric(levels(rsqtable$'P-Value'))[rsqtable$'P-Value']<.00192307, 'black','grey50')
+x1<-merge(x1,rsqtable,by="Study")
+
+
+levels(x1$Study)
+p<-ggplot(x1, aes(x=Study, y=slopes)) +
+  geom_violin(width=1.75, fill='lightblue') +
+  geom_boxplot(width=.4,outlier.size = 0) +
+  coord_flip() +
+  geom_abline(intercept=1, slope=0, linetype=2) +
+  ylab("Slope") +
+  theme(title = element_text(size=20),
+        axis.text=element_text(size=12, colour = "black"),
+        #axis.text.y=element_text(size=12, colour = "black"),
+        axis.title=element_text(size=16,face="bold"),
+        axis.title.y=element_blank(),
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.y = element_text(colour = c("grey50", "grey50", "grey50", "grey50", "black", "grey50", "grey50", "black", "black",  "black",  "grey50",  "black", "black",  "black",  "black",  "black",  "black",  "black",  "black",  "black",  "black",  "black",  "black",  "black", "black",  "black"))) + 
+  scale_y_continuous(breaks = c(seq(-.25,1.5,by=.25)), 
+                     labels = c(insert_minor(seq(-.25,1.5,by=.25),0,0)), 
+                     limits = c(0,1.5), 
+                     expand = c(0,0))
+
+levels(smallLabSet1$Study)
+hist_right <- ggplot()+
+  geom_histogram(aes(smallLabSet1$Study,fill=smallLabSet1$containsOneColor)) +
+  scale_fill_manual(name="One in CI?", values = c("black","blue"), labels=c('No','Yes')) +
+  coord_flip() +
+  labs(list(y='Frequency')) + 
+  theme(title = element_text(size=20),
+        axis.text.x=element_text(size=10, colour="black"),
+        axis.title=element_text(size=16,face="bold"),
+        axis.title.y=element_blank(),
+        axis.text.y = element_blank(),
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"),
+        axis.line.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.key = element_rect(fill = "white"),
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 8),
+        legend.key.height = unit(.2,"line"),
+        legend.position = c(.4,.1)) + 
+  scale_y_reverse()
+
+WIDTH<-5
+HEIGHT<-7
+vp1 <- viewport(width = 8/10, height = 12/12, x = 4/10, y = 6/12)
+vp2 <- viewport(width = 2/10, height = 12/12, x = 8.75/10, y = 6/12)
+
+grid.newpage()
+pushViewport(viewport(layout = grid.layout(6,5)))
+print(hist_right, vp = vp2)
+print(p, vp = vp1)
+
+grid.newpage()
+pushViewport(viewport(layout = grid.layout(6,5)))
+pdf("output/figures/pdf/bootstrap_slopes.pdf", width=8, height=8)
+print(hist_right, vp = vp2)
+print(p, vp = vp1)
+dev.off()
+
+jpeg("output/figures/jpg/bootstrap_slopes.jpg", width=600, height=600)
+print(hist_right, vp = vp2)
+print(p, vp = vp1)
+dev.off()
+
+save(rsqfits, file='output/data/SHALLOWRSQFITS.RData')
+```
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/DEEPSMALL.RData")
+load("output/data/DEEPSLOPES2.RData")
+fm2<-lme(log10VIRUS~log10BACTERIA, random=~1+log10BACTERIA|Study,data=DeepSmall)
+slopes<-as.data.frame(cbind(study=levels(factor(DeepSmall$Study)),slope=as.vector(coef(fm2)[,2])))
+slopes$study <- factor(slopes$study, levels = slopes$study[order(slopes$slope)])
+DeepSmall$Study <- factor(DeepSmall$Study, levels = rev(slopes$study[order(slopes$slope)]))
+
+slopes2a<-as.data.frame(cbind(sort(levels(factor(DeepSmall$Study))),deepslopes2))
+#library(reshape2)
+i <- sapply(slopes2a, is.factor)
+slopes2a[i] <- lapply(slopes2a[i], as.character)
+slopes2b<-melt(slopes2a, id.vars=c("V1"))
+slopes2b<-as.data.frame(slopes2b)
+x<-as.data.frame(cbind(as.character(slopes2b$V1),as.numeric(as.character(slopes2b$value))))
+x$Study<-factor(x$V1)
+x$slopes<-as.numeric(as.character(x$V2))
+oind <- order(as.numeric(by(x$slopes, x$Study, median)))   
+x$Study <- ordered(x$Study, levels=levels(x$Study)[oind])  
+
+points<-as.data.frame(table(DeepSmall$Study))
+names(points) <- c("Study", "Freq")
+points$logfreq<-ifelse(log10(points$Freq)>0, log10(points$Freq), points$logfreq<-0)
+newrow <- data.frame(Study = c('Total'), Freq = c(nrow(DeepSmall)), logfreq = c(log10(nrow(DeepSmall))))
+total<-rbind(points,newrow)
+DeepSmall<-merge(DeepSmall,points,by="Study")
+
+DeepSmall1<-DeepSmall
+DeepSmall1$Study <- factor(DeepSmall1$Study, levels = c("INDIANOCEAN2006","STRATIPHYT1","NORTHSEA2001","STRATIPHYT2","GREENLAND2012","CASES03-04","USC MO", "KH05_2", "GEOTRACES_LEG3", "KH04_5", "GEOTRACES","BATS"))
+
+total <- total[order(total1$Freq[1:12]),] 
+x1<-x
+x1$Study <- factor(x$Study, levels = c("INDIANOCEAN2006","STRATIPHYT1","NORTHSEA2001","STRATIPHYT2","GREENLAND2012","CASES03-04","USC MO", "KH05_2", "GEOTRACES_LEG3", "KH04_5", "GEOTRACES","BATS"))
+
+lme2<-lme(log10VIRUS~log10BACTERIA, random=~1+log10BACTERIA|Study,data=DeepSmall)
+ls2<-summary(lme2)
+studies<-levels(DeepSmall$Study)
+rsqs<-c()
+studycol<-c()
+pvals<-c()
+for (i in seq(1:length(levels(DeepSmall$Study)))){
+ sub<-DeepSmall[which(DeepSmall$Study == studies[i]),]
+ foo <- sub[, c('log10VIRUS','log10BACTERIA')] 
+ mod<-lm(sub$log10VIRUS ~ sub$log10BACTERIA)
+ foo$yhat <- (sub$log10BACTERIA*coef(mod)[2])+coef(mod)[1]
+ foo$e <- foo$log10VIRUS - foo$yhat
+ SST <- sum( (foo$log10VIRUS - mean(foo$log10VIRUS))^2 )
+ SSC <- sum( (foo$e)^2 )
+ (SST-SSC)/SST
+ studycol<-c(studycol,studies[i])
+ rsqs<-c(rsqs,round((SST-SSC)/SST,3))
+ summary<-summary(mod)
+ pval<-summary$coefficients[2,4]
+ pvals<-c(pvals,as.numeric(format(pval, scientific = TRUE, digits = 3)))
+}
+rsqfits<-as.data.frame(cbind(Study=studycol,RSQ=rsqs,'P-Value'=pvals),rownames=F)
+kable(rsqfits)
+rsqtable<-rsqfits[order(as.numeric(format(pvals, scientific = TRUE, digits = 3))),]
+deeprsqfits<-rsqfits[order(as.numeric(format(pvals, scientific = TRUE, digits = 3))),]
+rsqtable$labelcolor<-ifelse(as.numeric(levels(rsqtable$'P-Value'))[rsqtable$'P-Value']<.05/12, 'black','grey50')
+x1<-merge(x1,rsqtable,by="Study")
+
+
+p<-ggplot(x1, aes(x=Study, y=slopes)) +
+ geom_violin(width=1.75, fill='lightblue') +
+ geom_boxplot(width=.4,outlier.size = 0) +
+ coord_flip() +
+ geom_abline(intercept=1, slope=0, linetype=2) +
+ ylab("Slope") +
+ theme(title = element_text(size=20),
+       axis.text=element_text(size=12, colour = "black"),
+       #axis.text.y=element_text(size=12, colour = "black"),
+       axis.title=element_text(size=16,face="bold"),
+       axis.title.y=element_blank(),
+       panel.background = element_blank(), 
+       axis.line = element_line(colour = "black"),
+       panel.grid.major = element_blank(),
+       panel.grid.minor = element_blank(),
+       axis.text.y = element_text(colour = c("grey50", "black", "black",  "black",  "black",  "grey50", "black",  "black",  "black",  "black",  "black",  "black"))) + 
+ scale_y_continuous(breaks = c(seq(-.25,1.5,by=.25)), 
+                    labels = c(insert_minor(seq(-.25,1.5,by=.25),0,0)), 
+                    limits = c(0,1.5), 
+                    expand = c(0,0))
+
+hist_right <- ggplot()+
+ #geom_histogram(aes(DeepSmall1$Study,fill=DeepSmall1$containsOneColor)) +
+ geom_histogram(aes(DeepSmall1$Study,fill=DeepSmall1$containsOneColor)) +
+ scale_fill_manual(name="One in CI?", values = c("black","blue"), labels=c('No','Yes')) +
+ coord_flip() +
+ labs(list(y='Frequency')) + 
+ theme(title = element_text(size=20),
+       axis.text.x=element_text(size=10, colour="black"),
+       axis.title=element_text(size=16,face="bold"),
+       axis.title.y=element_blank(),
+       axis.text.y = element_blank(),
+       panel.background = element_blank(), 
+       axis.line = element_line(colour = "black"),
+       axis.line.y = element_blank(),
+       axis.ticks.y = element_blank(),
+       panel.grid.major = element_blank(),
+       panel.grid.minor = element_blank(),
+       legend.key = element_rect(fill = "white"),
+       legend.title = element_text(size = 12),
+       legend.text = element_text(size = 8),
+       legend.key.height = unit(.2,"line"),
+       legend.position = c(.4,.1)) + 
+scale_y_reverse()
+
+WIDTH<-5
+HEIGHT<-7
+vp1 <- viewport(width = 8/10, height = 12/12, x = 4/10, y = 6/12)
+vp2 <- viewport(width = 2/10, height = 12/12, x = 8.75/10, y = 6/12)
+grid.newpage()
+pushViewport(viewport(layout = grid.layout(6,5)))
+
+pdf("output/figures/pdf/deepbootstrap_slopes.pdf", width=8, height=8)
+print(hist_right, vp = vp2)
+print(p, vp = vp1)
+dev.off()
+
+jpeg("output/figures/jpg/deepbootstrap_slopes.jpg", width=600, height=600)
+print(hist_right, vp = vp2)
+print(p, vp = vp1)
+dev.off()
+
+save(deeprsqfits, file='output/data/DEEPRSQFITS.RData')
+
+```
+
+
+Constrained regression model where the intercept for each lab was permitted to be between one standard deviation above or below the standard error of the intercept from the simple linear regression model. Here SE(intercept) = 0.10995505, estimate(intercept) = 4.4427386, and estimate(slope) = 0.4301043. R-squared for this model is 0.3486318.
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/SMALLLABSET.RData")
+z4<-ifelse(smallLabSet$Study == "ARCTICSBI",1,0)
+z24<-ifelse(smallLabSet$Study == "BATS",1,0)
+z6<-ifelse(smallLabSet$Study == "BEDFORDBASIN",1,0)
+z3<-ifelse(smallLabSet$Study == "NORTHSEA2001",1,0)
+z8<-ifelse(smallLabSet$Study == "CASES03-04",1,0)
+z12<-ifelse(smallLabSet$Study == "ELA",1,0)
+z2<-ifelse(smallLabSet$Study == "FECYCLE1",1,0)
+z22<-ifelse(smallLabSet$Study == "FECYCLE2",1,0)
+z20<-ifelse(smallLabSet$Study == "GEOTRACES",1,0)
+z19<-ifelse(smallLabSet$Study == "GEOTRACES_LEG3",1,0)
+z16<-ifelse(smallLabSet$Study == "KH04_5",1,0)
+z21<-ifelse(smallLabSet$Study == "KH05_2",1,0)
+z5<-ifelse(smallLabSet$Study == "GREENLAND2012",1,0)
+z25<-ifelse(smallLabSet$Study == "INDIANOCEAN2006",1,0)
+z18<-ifelse(smallLabSet$Study == "MOVE",1,0)
+z10<-ifelse(smallLabSet$Study == "NASB2005",1,0)
+z23<-ifelse(smallLabSet$Study == "POWOW",1,0)
+z17<-ifelse(smallLabSet$Study == "RAUNEFJORD2000",1,0)
+z1<-ifelse(smallLabSet$Study == "SOG",1,0)
+z9<-ifelse(smallLabSet$Study == "STRATIPHYT1",1,0)
+z11<-ifelse(smallLabSet$Study == "STRATIPHYT2",1,0)
+z26<-ifelse(smallLabSet$Study == "SWAT",1,0)
+z15<-ifelse(smallLabSet$Study == "TABASCO",1,0)
+z7<-ifelse(smallLabSet$Study == "TROUT",1,0)
+z14<-ifelse(smallLabSet$Study == "USC MO",1,0)
+y<-smallLabSet$log10VIRUS
+x<-smallLabSet$log10BACTERIA
+#summary(lm(log10VIRUS~log10BACTERIA,data=smallLabSet))$coef
+#estimate + sd on lab intercepts
+# 4.4427386 + 0.10995505 = 4.552694
+# estimate - sd on lab intercepts
+# 4.4427386 - 0.10995505 = 4.332784
+variableInterceptwithconstraints<-nls(y~slope*x+SOG*z1+FECYCLE1*z2+NORTHSEA2001*z3+ARCTICSBI*z4+GREENLAND2012*z5+BEDFORDBASIN*z6+TROUT*z7+CASES0304*z8+STRATAPHYT1*z9+NASB2005*z10+STRATAPHYT2*z11+ELA*z12+USCMO*z14+TABASCO*z15+KHO4*z16+Raunefjord*z17+MOVE*z18+GEOTRACES_LEG3*z19+GEOTRACES*z20+KH05_2*z21+FECYCLE2*z22+POWOW*z23+BATS*z24+INDIANOCEAN2006*z25+SWAT*z26,algorithm="port",
+start=c(slope=0,SOG=4.332784,FECYCLE1=4.332784,NORTHSEA2001=4.332784,ARCTICSBI=4.332784,GREENLAND2012=4.332784,BEDFORDBASIN=4.332784,TROUT=4.332784,CASES0304=4.332784,STRATAPHYT1=4.332784,NASB2005=4.332784,STRATAPHYT2=4.332784,ELA=4.332784,USCMO=4.332784,TABASCO=4.332784,KHO4=4.332784,Raunefjord=4.332784,MOVE=4.332784,GEOTRACES_LEG3=4.332784,GEOTRACES=4.332784,KH05_2=4.332784,FECYCLE2=4.332784,POWOW=4.332784,BATS=4.332784,INDIANOCEAN2006=4.332784,SWAT=4.332784),
+lower=c(slope=-Inf,SOG=4.332784,FECYCLE1=4.332784,NORTHSEA2001=4.332784,ARCTICSBI=4.332784,GREENLAND2012=4.332784,BEDFORDBASIN=4.332784,TROUT=4.332784,CASES0304=4.332784,STRATAPHYT1=4.332784,NASB2005=4.332784,STRATAPHYT2=4.332784,ELA=4.332784,USCMO=4.332784,TABASCO=4.332784,KHO4=4.332784,Raunefjord=4.332784,MOVE=4.332784,GEOTRACES_LEG3=4.332784,GEOTRACES=4.332784,KH05_2=4.332784,FECYCLE2=4.332784,POWOW=4.332784,BATS=4.332784,INDIANOCEAN2006=4.332784,SWAT=4.332784),
+upper=c(slope=Inf,SOG=4.552694,FECYCLE1=4.552694,NORTHSEA2001=4.552694,ARCTICSBI=4.552694,GREENLAND2012=4.552694,BEDFORDBASIN=4.552694,TROUT=4.552694,CASES0304=4.552694,STRATAPHYT1=4.552694,NASB2005=4.552694,STRATAPHYT2=4.552694,ELA=4.552694,USCMO=4.552694,TABASCO=4.552694,KHO4=4.552694,Raunefjord=4.552694,MOVE=4.552694,GEOTRACES_LEG3=4.552694,GEOTRACES=4.552694,KH05_2=4.552694,FECYCLE2=4.552694,POWOW=4.552694,BATS=4.552694,INDIANOCEAN2006=4.552694,SWAT=4.552694))
+shallowcv<-variableInterceptwithconstraints
+tss<-sum((smallLabSet$log10VIRUS-mean(smallLabSet$log10VIRUS))^2)
+m1<-lm(smallLabSet$log10VIRUS ~ smallLabSet$log10BACTERIA)
+shallowconstrained<-ggplot(smallLabSet, aes(x=log10BACTERIA, y=log10VIRUS, colour=Study)) +
+  geom_point(size=.01, alpha=.01) +
+  geom_abline(intercept=4.4806966, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.5526940, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.3327840, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.3327840, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.5526940, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.3327840, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.3362559, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.3327840, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.3399020, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.5526940, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.3327840, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.3896576, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.3327840, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.5526940, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.3327840, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.5526940, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.5526940, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.332784, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.332784, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.5130411, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.5526940, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.4089481, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.3327840, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.3327840, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=4.3327840, slope=0.4301043, col='darkgreen', size=.25, alpha=1) +
+  labs(list(x=expression(paste("Microbe abundance per mL (",log[10]," scale)")),
+            y=expression(paste("Virus abundance per mL (",log[10]," scale)")))) +
+  geom_abline(intercept=coef(m1)[[1]], slope=coef(m1)[[2]], col='#D55E00', size=2) +
+  geom_abline(intercept=1, slope=1, col='#0072B2', size=2) +
+  annotate(size=6,family="Helvetica", fontface="bold",geom="text",x = 5.0, y = 6.35, label = 'B', parse = TRUE) +
+  annotate(size=6,family="Helvetica", fontface="bold",geom="text",x = 5.0, y = 6.85, label = 'A', parse = TRUE) +
+  annotate(size=6,family="Helvetica", fontface="bold",geom="text",x = 6.75, y = 6.95, label = "Power Law", parse = F) +
+  annotate(size=6,family="Helvetica", fontface="bold",geom="text",x = 6.65, y = 7.95, label = as.character(paste("10","1",sep=":")), parse = F) +
+  theme(aspect.ratio=1,
+        title = element_text(size=20),
+        axis.text=element_text(size=16, colour="black"),
+        axis.title=element_text(size=16,face="bold"),
+        #text = element_text(size=32),aspect.ratio=1,
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        #legend.position = c(.1,.75),
+        legend.position = 'none',
+        legend.key = element_rect(fill = "white"),
+        legend.key.size = unit(.5, "cm")) +
+  scale_x_continuous(breaks = c(seq(4.5,9,by=.25)),
+                     labels = c(insert_minor(seq(4.5,9,by=.5),1,1)),
+                     #limits = c(4.6,9),
+                     expand = c(0,0)) +
+  scale_y_continuous(breaks = c(seq(5.5,9,by=.25)),
+                     labels = c(insert_minor(seq(5.5,9,by=.5),1,1)),
+                     #limits = c(min(smallLabSet$log10VIRUS)-1,max(smallLabSet$log10VIRUS)),
+                     #expand = c(0,0)) + colScale
+                     expand = c(0,0))
+
+pdf("output/figures/pdf/constrainedRegression.pdf", width=8, height=8)
+print(shallowconstrained)
+dev.off()
+
+jpeg("output/figures/jpg/constrainedRegression.jpg", width=600, height=600)
+print(shallowconstrained)
+dev.off()
+
+shallowvariableInterceptwithconstraints<-variableInterceptwithconstraints
+saveRDS(predict(variableInterceptwithconstraints), file = "output/data/SHALLOWVARIABLEINTERCEPTWITHCONSTRAINTS.rds")
+save(shallowvariableInterceptwithconstraints, file = "output/data/SHALLOWCONSTRAINTS.RData")
+```
+
+
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/DEEPSMALL.RData")
+STRATAPHYT1<-DeepSmall[which(DeepSmall$Study == 'STRATIPHYT1'),]
+STRATAPHYT2<-DeepSmall[which(DeepSmall$Study == 'STRATIPHYT2'),]
+CASES0304<-DeepSmall[which(DeepSmall$Study == 'CASES03-04'),]
+USCMO<-DeepSmall[which(DeepSmall$Study == 'USC MO'),]
+BATS<-DeepSmall[which(DeepSmall$Study == 'BATS'),]
+KH05_2<-DeepSmall[which(DeepSmall$Study == 'KH05_2'),]
+GEOTRACES<-DeepSmall[which(DeepSmall$Study == 'GEOTRACES'),]
+KH04_5<-DeepSmall[which(DeepSmall$Study == 'KH04_5'),]
+GEOTRACES_LEG3<-DeepSmall[which(DeepSmall$Study == 'GEOTRACES_LEG3'),]
+GREENLAND2012<-DeepSmall[which(DeepSmall$Study == 'GREENLAND2012'),]
+INDIANOCEAN2006<-DeepSmall[which(DeepSmall$Study == 'INDIANOCEAN2006'),]
+NORTHSEA2001<-DeepSmall[which(DeepSmall$Study == 'NORTHSEA2001'),]
+z24<-ifelse(DeepSmall$Study == "BATS",1,0)
+z3<-ifelse(DeepSmall$Study == "NORTHSEA2001",1,0)
+z8<-ifelse(DeepSmall$Study == "CASES03-04",1,0)
+z20<-ifelse(DeepSmall$Study == "GEOTRACES",1,0)
+z19<-ifelse(DeepSmall$Study == "GEOTRACES_LEG3",1,0)
+z16<-ifelse(DeepSmall$Study == "KH04_5",1,0)
+z21<-ifelse(DeepSmall$Study == "KH05_2",1,0)
+z5<-ifelse(DeepSmall$Study == "GREENLAND2012",1,0)
+z25<-ifelse(DeepSmall$Study == "INDIANOCEAN2006",1,0)
+z9<-ifelse(DeepSmall$Study == "STRATIPHYT1",1,0)
+z11<-ifelse(DeepSmall$Study == "STRATIPHYT2",1,0)
+z14<-ifelse(DeepSmall$Study == "USC MO",1,0)
+y<-DeepSmall$log10VIRUS
+x<-DeepSmall$log10BACTERIA
+#y%*%x/(sqrt(x%*%x)*sqrt(y%*%y)) = 0.9973633 i.e. theta = 180*(acos(0.9973633)/pi) = 4.16163 degrees
+#summary(lm(log10VIRUS~log10BACTERIA,data=DeepSmall))$coef
+#estimate + sd on lab intercepts
+# 3.513389 + 0.037668749 = 3.551058
+# estimate - sd on lab intercepts
+# 3.513389 - 0.037668749 = 3.47572
+
+#data$Study<-revalue(data$Study, c("Balsom - arctic"="ARCTICSBI",'Bratbak 2001'='NORTHSEA2001', "MiddleboeGREENLAND2012"="GREENLAND2012", "MiddleBoeIndia" = 'INDIANOCEAN2006'))
+
+variableInterceptwithconstraints<-nls(y~slope*x+NORTHSEA2001*z3+GREENLAND2012*z5+CASES0304*z8+STRATAPHYT1*z9+STRATAPHYT2*z11+USCMO*z14+KHO4*z16+GEOTRACES_LEG3*z19+GEOTRACES*z20+KH05_2*z21+BATS*z24+INDIANOCEAN2006*z25,algorithm="port",
+start=c(slope=0,NORTHSEA2001=3.47572,GREENLAND2012=3.47572,CASES0304=3.47572,STRATAPHYT1=3.47572,STRATAPHYT2=3.47572,USCMO=3.47572,KHO4=3.47572,GEOTRACES_LEG3=3.47572,GEOTRACES=3.47572,KH05_2=3.47572,BATS=3.47572,INDIANOCEAN2006=3.47572),
+lower=c(slope=-Inf,NORTHSEA2001=3.47572,GREENLAND2012=3.47572,CASES0304=3.47572,STRATAPHYT1=3.47572,STRATAPHYT2=3.47572,USCMO=3.47572,KHO4=3.47572,GEOTRACES_LEG3=3.47572,GEOTRACES=3.47572,KH05_2=3.47572,BATS=3.47572,INDIANOCEAN2006=3.47572),
+upper=c(slope=Inf,NORTHSEA2001=3.551058,GREENLAND2012=3.551058,CASES0304=3.551058,STRATAPHYT1=3.551058,STRATAPHYT2=3.551058,USCMO=3.551058,KHO4=3.551058,GEOTRACES_LEG3=3.551058,GEOTRACES=3.551058,KH05_2=3.551058,BATS=3.551058,INDIANOCEAN2006=3.551058))
+
+tss<-sum((DeepSmall$log10VIRUS-mean(DeepSmall$log10VIRUS))^2)
+deepcv<-variableInterceptwithconstraints
+m1<-lm(DeepSmall$log10VIRUS ~ DeepSmall$log10BACTERIA)
+deepconstrained<-ggplot(DeepSmall, aes(x=log10BACTERIA, y=log10VIRUS, colour=Study)) +
+  geom_point(size=.01, alpha=.01) +
+  geom_abline(intercept=3.4757200, slope=0.5325704, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=3.4757200, slope=0.5325704, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=3.4757200, slope=0.5325704, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=3.5510580, slope=0.5325704, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=3.5510580, slope=0.5325704, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=3.5510580, slope=0.5325704, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=3.5125687, slope=0.5325704, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=3.4757200, slope=0.5325704, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=3.5510580, slope=0.5325704, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=3.5190784, slope=0.5325704, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=3.4757200, slope=0.5325704, col='darkgreen', size=.25, alpha=1) +
+  geom_abline(intercept=3.4757200, slope=0.5325704, col='darkgreen', size=.25, alpha=1) +
+  labs(list(x=expression(paste("Microbe abundance per mL (",log[10]," scale)")),
+            y=expression(paste("Virus abundance per mL (",log[10]," scale)")))) +
+  geom_abline(intercept=coef(m1)[[1]], slope=coef(m1)[[2]], col='#D55E00', size=2) +
+  geom_abline(intercept=1, slope=1, col='#0072B2', size=2) +
+  annotate(size=6,family="Helvetica", fontface="bold",geom="text",x = 4, y = 5.45, label = 'Power Law', parse = F) +
+  annotate(size=6,family="Helvetica", fontface="bold",geom="text",x = 5.7, y = 7.0, label = "10:1", parse = F) +
+  theme(aspect.ratio=1,
+        plot.title=element_text(size=20),
+        axis.text=element_text(size=16),
+        axis.title=element_text(size=16,face="bold"),
+        #text = element_text(size=32),aspect.ratio=1,
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.position = "NONE") +
+  scale_x_continuous(breaks = c(seq(3.0,8,by=.25)),
+                     labels = c(insert_minor(seq(3.0,8,by=.5),1,1)),
+                     #limits = c(4.6,8),
+                     expand = c(0,0)) +
+  scale_y_continuous(breaks = c(seq(3.0,9,by=.25)),
+                     labels = c(insert_minor(seq(3.0,9,by=.5),1,1)),
+                     #limits = c(4.6,9),
+                     expand = c(0,0))
+
+pdf("output/figures/pdf/deepconstrainedRegression.pdf", width=8, height=8)
+print(deepconstrained)
+dev.off()
+
+jpeg("output/figures/jpg/deepconstrainedRegression.jpg", width=600, height=600)
+print(deepconstrained)
+dev.off()
+
+deepfitteddata<-as.vector(predict(variableInterceptwithconstraints))
+saveRDS(deepfitteddata, file = "output/data/DEEPVARIABLEINTERCEPTWITHCONSTRAINTS.rds")
+deepvariableInterceptwithconstraints<-variableInterceptwithconstraints
+save(deepvariableInterceptwithconstraints, file = "output/data/DEEPCONSTRAINTS.RData")
+```
+
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+#figure22_1-1
+require(grid)
+load("output/data/SMALL.RData")
+smallLabSet<-small[which(small$DepthCategory == "<=100m"),]
+DeepSmall<-small[which(small$DepthCategory == ">100m"),]
+
+ann4 <- data.frame(
+  m1int = c(summary(lm(smallLabSet$log10VIRUS ~ smallLabSet$log10BACTERIA))$coefficients[1],summary(lm(DeepSmall$log10VIRUS ~ DeepSmall$log10BACTERIA))$coefficients[1]),
+  m1slope = c(summary(lm(smallLabSet$log10VIRUS ~ smallLabSet$log10BACTERIA))$coefficients[2],summary(lm(DeepSmall$log10VIRUS ~ DeepSmall$log10BACTERIA))$coefficients[2]),
+  DeepShallow = c('<=100m', '>100m'),
+  constrainedslopes = c(0.4301043,0.5325704),
+  constrainedints1 = c(4.4806966,3.4757200),
+  constrainedints2 = c(4.5526940,3.5510580),
+  constrainedints3 = c(4.3327840,3.5125687),
+  constrainedints4 = c(4.3362559,3.5190784),
+  constrainedints5 = c(4.3399020,3.5190784),
+  constrainedints6 = c(4.3896576,3.5190784),
+  constrainedints7 = c(4.5130411,3.5190784),
+  constrainedints8 = c(4.4089481,3.5190784)
+  )
+
+ann5 <- data.frame(meX = 3.73, 
+                   meY = 5.3, 
+                   plX = 6.8,
+                   plY = 6.9, 
+                   toX=7, 
+                   toY = 8.3,
+                   Alab = 'A',
+                   AX = 4.5, 
+                   AY = 6.75,
+                   BX = 4.5, 
+                   BY = 6,
+                   Blab = 'B',
+                   DeepShallow = factor('<=100m', levels = c('<=100m', '>100m')))
+
+shallowdeepconstrainedRegression<-ggplot(small, aes(x=log10BACTERIA, y=log10VIRUS)) +
+  geom_point(size=.01, alpha=.01) +
+  facet_grid(. ~ DeepShallow) +
+  geom_abline(data=ann4, aes(intercept=m1int, slope=m1slope), col='#D55E00', size=1) + #orange power law line
+  #geom_abline(data=ann4, aes(intercept=MEintset, slope=MEslopeset), col='#33CC33', size=1) + #green mixed effects Fixed Effects line
+  geom_abline(intercept=1, slope=1, col='black', size=1) + #black line
+   geom_text(data=ann5,aes(x=toX,y=toY,label='10:1'),show_guide=F,size=4,family="Helvetica", fontface="bold") + 
+   geom_text(data=ann5,aes(x=plX,y=plY,label='Power Law'),show_guide=F,size=4,family="Helvetica", fontface="bold") +
+  geom_text(data=ann5,aes(x=AX,y=AY,label=Alab),show_guide=F,size=4,family="Helvetica", fontface="bold") +
+  geom_text(data=ann5,aes(x=BX,y=BY,label=Blab),show_guide=F,size=4,family="Helvetica", fontface="bold") +
+  geom_abline(data=ann4, aes(intercept=constrainedints1, slope=m1slope), col='darkgreen', size=.25) +
+  geom_abline(data=ann4, aes(intercept=constrainedints2, slope=m1slope), col='darkgreen', size=.25) +
+  geom_abline(data=ann4, aes(intercept=constrainedints3, slope=m1slope), col='darkgreen', size=.25) +
+  geom_abline(data=ann4, aes(intercept=constrainedints4, slope=m1slope), col='darkgreen', size=.25) +
+  geom_abline(data=ann4, aes(intercept=constrainedints5, slope=m1slope), col='darkgreen', size=.25) +
+  geom_abline(data=ann4, aes(intercept=constrainedints6, slope=m1slope), col='darkgreen', size=.25) +
+  geom_abline(data=ann4, aes(intercept=constrainedints7, slope=m1slope), col='darkgreen', size=.25) +
+  geom_abline(data=ann4, aes(intercept=constrainedints8, slope=m1slope), col='darkgreen', size=.25) +
+  labs(list(x=expression(paste("Microbe abundance per mL (",log[10]," scale)")),
+            y=expression(paste("Virus abundance per mL (",log[10]," scale)")))) +
+  theme(aspect.ratio=1,
+        title = element_text(size=20),
+        strip.background = element_rect(fill="white"),
+        strip.text.x = element_text(size = 16,face="bold"),
+        axis.text=element_text(size=16, colour="black"),
+        axis.title=element_text(size=16,face="bold"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.margin = unit(1, "lines"),
+        axis.line = element_line(colour = "black"),
+        legend.position = 'none',
+        legend.key = element_rect(fill = "white"),
+        legend.key.size = unit(.5, "cm")) +
+    scale_x_continuous(breaks = c(seq(3.0,8,by=.25)),
+                     labels = c(insert_minor(seq(3.0,8,by=.5),1,1)),
+                     #limits = c(4.6,8),
+                     expand = c(0,0)) +
+  scale_y_continuous(breaks = c(seq(3.0,9,by=.25)),
+                     labels = c(insert_minor(seq(3.0,9,by=.5),1,1)),
+                     #limits = c(4.6,9),
+                     expand = c(0,0))
+shallowdeepconstrainedRegression
+
+pdf("output/figures/pdf/shallowdeepconstrainedRegression.pdf", width=10, height=5)
+print(shallowdeepconstrainedRegression)
+dev.off()
+
+jpeg("output/figures/jpg/shallowdeepconstrainedRegression.jpg", width=800, height=400)
+print(shallowdeepconstrainedRegression)
+dev.off()
+```
+
+Comparison of AIC and BIC of each of the linear models applied to viral abundance data
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/SMALLLABSET.RData")
+shallowVariableInterceptWithConstraints <- readRDS("output/data/SHALLOWVARIABLEINTERCEPTWITHCONSTRAINTS.rds")
+deepVariableInterceptWithConstraints <- readRDS("output/data/DEEPVARIABLEINTERCEPTWITHCONSTRAINTS.rds")
+
+AICc <- function(col1,col2){
+  N<-length(col1)
+  SSE<-sum(log(col1/col2)^2)
+  return(N*log(SSE/N))
+}
+
+calcRSQ <- function(obs,pred){
+  ssTotal <- sum((obs-mean(obs))^2)
+  ssResidual <- sum((obs - pred)^2)
+  return(1-(ssResidual/ssTotal))
+}
+
+m1<-lm(log10VIRUS~log10BACTERIA,data=smallLabSet)
+fm1<-lme(log10VIRUS~log10BACTERIA, random=~1|Study,data=smallLabSet)
+fm2<-lme(log10VIRUS~log10BACTERIA, random=~1+log10BACTERIA|Study,data=smallLabSet)
+
+TenOneAICc <-AICc(smallLabSet$log10VIRUS,smallLabSet$log10BACTERIA + 1)
+powerlawAICc <-AICc(smallLabSet$log10VIRUS,m1$fitted.values)
+VarIntSlopeStudyAICc <- AICc(smallLabSet$log10VIRUS,fm2$fitted[,2])
+VarIntFixedSlopeFixedAICc <- AICc(smallLabSet$log10VIRUS,shallowVariableInterceptWithConstraints)
+
+TenOneRSQ <- calcRSQ(smallLabSet$log10VIRUS,smallLabSet$log10BACTERIA + 1)
+powerlawRSQ <- calcRSQ(smallLabSet$log10VIRUS,m1$fitted.values)
+VarIntSlopeStudyRSQ <- calcRSQ(smallLabSet$log10VIRUS,fm2$fitted[,2])
+VarIntFixedSlopeFixedRSQ <- calcRSQ(smallLabSet$log10VIRUS,shallowVariableInterceptWithConstraints)
+
+AIC<-sprintf("%.2f", c(round(TenOneAICc,2),round(powerlawAICc,2),round(VarIntFixedSlopeFixedAICc,2), round(VarIntSlopeStudyAICc,2)))
+RSQ<-sprintf("%.2f", c(round(TenOneRSQ,2),round(powerlawRSQ,2),round(VarIntFixedSlopeFixedRSQ,2),round(VarIntSlopeStudyRSQ,2)))
+model<-c('10:1','Power Law','Constrained Power Law by Study','Power Law by Study')
+modelcomparison<-as.data.frame(cbind(model,RSQ,AIC))
+modelcomparison1<-as.data.frame(cbind(model,RSQ,AIC))
+kable(modelcomparison1)
+
+load("output/data/DEEPSMALL.RData")
+fm1<-lme(log10VIRUS~log10BACTERIA, random=~1|Study,data=DeepSmall)
+fm2<-lme(log10VIRUS~log10BACTERIA, random=~1+log10BACTERIA|Study,data=DeepSmall)
+
+TenOneAICc <- AICc(DeepSmall$log10VIRUS,DeepSmall$log10BACTERIA + 1)
+powerlawAICc <-AICc(DeepSmall$log10VIRUS,m1$fitted.values)
+VarIntSlopeStudyAICc <-AICc(DeepSmall$log10VIRUS,fm2$fitted[,2])
+VarIntFixedSlopeFixedAICc <-AICc(DeepSmall$log10VIRUS,deepVariableInterceptWithConstraints)
+
+TenOneRSQ <- calcRSQ(DeepSmall$log10VIRUS,DeepSmall$log10BACTERIA + 1)
+powerlawRSQ <- calcRSQ(DeepSmall$log10VIRUS,m1$fitted.values)
+VarIntSlopeStudyRSQ <- calcRSQ(DeepSmall$log10VIRUS,fm2$fitted[,2])
+VarIntFixedSlopeFixedRSQ <- calcRSQ(DeepSmall$log10VIRUS,deepVariableInterceptWithConstraints)
+
+AIC<-sprintf("%.2f", c(round(TenOneAICc,2),round(powerlawAICc,2),round(VarIntFixedSlopeFixedAICc,2), round(VarIntSlopeStudyAICc,2)))
+RSQ<-sprintf("%.2f", c(round(TenOneRSQ,2),round(powerlawRSQ,2),round(VarIntFixedSlopeFixedRSQ,2),round(VarIntSlopeStudyRSQ,2)))
+model<-c('10:1','Power Law','Constrained Power Law by Study','Power Law by Study')
+modelcomparison<-as.data.frame(cbind(model,RSQ,AIC))
+modelcomparison2<-as.data.frame(cbind(model,RSQ,AIC))
+kable(modelcomparison2)
+
+names(modelcomparison1) <- c("Model", "Shallow RSQ", "Shallow AIC")
+names(modelcomparison2) <- c("Model", "Deep RSQ", "Deep AIC")
+totalAIC<-merge(modelcomparison1,modelcomparison2, all = TRUE)
+kable(totalAIC[c(1,3,2,4),])
+```
+
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+#figure31
+load("output/data/SMALLLABSET.RData")
+load("output/data/DEEPSMALL.RData")
+fm2<-lme(log10VIRUS~log10BACTERIA, random=~1+log10BACTERIA|Study,data=smallLabSet)
+fm2a<-lme(log10VIRUS~log10BACTERIA, random=~1+log10BACTERIA|Study,data=DeepSmall)
+s2<-summary(fm2)
+s2f<-as.data.frame(s2$coefficients$fixed)
+s2r<-as.data.frame(s2$coefficients$random)
+names(s2f) <- c("commonADJ")
+names(s2r) <- c("Shallow Intercept", "Shallow Slope")
+s2full<-as.data.frame(cbind(rownames(s2r),sprintf("%.2f",s2r$'Shallow Intercept' + s2f$commonADJ[1]), sprintf("%.2f",s2r$'Shallow Slope' + s2f$commonADJ[2])))
+names(s2full) <- c("Study", "Shallow Intercept", "Shallow Slope")
+s2a<-summary(fm2a)
+s2fa<-as.data.frame(s2a$coefficients$fixed)
+s2ra<-as.data.frame(s2a$coefficients$random)
+names(s2fa) <- c("commonADJ")
+names(s2ra) <- c("Shallow Intercept", "Shallow Slope")
+s2fulla<-as.data.frame(cbind(rownames(s2ra),sprintf("%.2f",s2ra$'Shallow Intercept' + s2fa$commonADJ[1]), sprintf("%.2f",s2ra$'Shallow Slope' + s2fa$commonADJ[2])))
+names(s2fulla) <- c("Study", "Deep Intercept", "Deep Slope")
+
+totalcv<-merge(s2full,s2fulla, all = TRUE)
+totalcv[is.na(totalcv)] <- NA
+totalcv1 <- sapply(totalcv, as.character)
+totalcv1[is.na(totalcv1)] <- " "
+kable(totalcv1)
+```
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/DEEPCONSTRAINTS.RData")
+load("output/data/SHALLOWCONSTRAINTS.RData")
+
+shallowcv<-shallowvariableInterceptwithconstraints
+deepcv<-deepvariableInterceptwithconstraints
+shallowtab<-as.data.frame(summary(shallowcv)$parameters)
+shallowtab<-as.data.frame(cbind(Study=rownames(shallowtab),sprintf("%.2f",shallowtab[,1]),sprintf("%.2f",shallowtab[,2])))
+deeptab<-as.data.frame(summary(deepcv)$parameters)
+deeptab<-as.data.frame(cbind(Study=rownames(deeptab),sprintf("%.2f",deeptab[,1]),sprintf("%.2f",deeptab[,2])))
+names(shallowtab) <- c("Study", "Shallow Est", "Shallow StErr")
+names(deeptab) <- c("Study", "Deep Est", "Deep StErr")
+totalcv<-merge(shallowtab,deeptab, all = TRUE)
+totalcv[is.na(totalcv)] <- NA
+totalcv1 <- sapply(totalcv, as.character)
+totalcv1[is.na(totalcv1)] <- " "
+kable(totalcv1)
+
+```
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load('output/data/SHALLOWRSQFITS.RData')
+load('output/data/DEEPRSQFITS.RData')
+
+shallowrsqfits<-rsqfits
+names(shallowrsqfits) <- c("Study", "Shallow RSQ", "Shallow P-Value")
+#deepobs<-as.data.frame(table(DeepSmall$Study))
+names(deeprsqfits) <- c("Study", "Deep RSQ", "Deep P-Value")
+totalrsqs<-merge(shallowrsqfits,deeprsqfits, all = TRUE)
+totalrsqs[is.na(totalrsqs)] <- NA
+totalrsqs1 <- sapply(totalrsqs, as.character)
+totalrsqs1[is.na(totalrsqs1)] <- " "
+kable(totalrsqs1)
+```
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/SHALLOWPERCENTILES2.RData")
+load("output/data/DEEPPERCENTILES2.RData")
+#percentiles2
+#deeppercentiles2
+ninetfyfivepercent<-merge(percentiles2,deeppercentiles2, all = TRUE, by="row.names")
+kable(ninetfyfivepercent)
+```
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+load("output/data/DEEPCONSTRAINTS.RData")
+load("output/data/SHALLOWCONSTRAINTS.RData")
+load("output/data/SMALLLABSET.RData")
+deepvariableInterceptwithconstraints
+
+summobj<-summary(shallowvariableInterceptwithconstraints)
+df<-as.data.frame(summary(shallowvariableInterceptwithconstraints)$coefficients, rownames=F)
+s<-df[,1:2]
+s <- as.data.frame(cbind(Study = rownames(s), s))
+s$Study <- factor(s$Study, levels = c("slope", "ARCTICSBI","BATS","BEDFORDBASIN","CASES0304","ELA","FECYCLE1","FECYCLE2","GEOTRACES","GEOTRACES_LEG3","GREENLAND2012","INDIANOCEAN2006","KHO4","KH05_2","MOVE","NASB2005","NORTHSEA2001","POWOW","Raunefjord","SOG","STRATAPHYT1","STRATAPHYT2","SWAT","TABASCO","TROUT","USCMO"))
+s<-s[order(s$Study),]
+rownames(s) <- NULL
+#kable(s)
+m1<-lm(log10VIRUS~log10BACTERIA,data=smallLabSet)
+s1<-s[2:nrow(s),]
+s1<-s1[rev(order(s1$Estimate)),]
+m1row <- data.frame(Study = 'Power Law REGRESSION INT', Estimate = coef(m1)[[1]], 'Std. Error' = summary(m1)$coefficients[ , 2][1], check.names=F)
+s1<-rbind(s1,m1row)
+#rsqtable<-rsqfits[order(as.numeric(format(pvals, scientific = TRUE, digits = 3))),]
+s1<-s1[rev(order(s1$Estimate)),]
+rownames(s1) <- NULL
+s1<-cbind(s1,Group=c(rep("A",9)," ",rep("B",16)))
+kable(s1)
+```
+
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+#identify inliers
+#table(small$DepthCategory)
+load("output/data/SMALL.RDATA")
+load("output/data/SMALLLABSET.RDATA")
+load("output/data/DEEPSMALL.RDATA")
+low<-quantile(small$Log10_VirBac_Ratio,probs=c(.02))
+high<-quantile(small$Log10_VirBac_Ratio,probs=c(.98))
+inset<-smallLabSet[smallLabSet$Log10_VirBac_Ratio <= high & smallLabSet$Log10_VirBac_Ratio >= low,]
+small$inset<-ifelse(small$Log10_VirBac_Ratio <= high & small$Log10_VirBac_Ratio >= low,'Inlier Set','Outlier Set')
+insetDeep<-small[which(small$Log10_VirBac_Ratio <= high & small$Log10_VirBac_Ratio >= low & small$DepthCategory == ">100m"),]
+smallInset<-small[which(small$Log10_VirBac_Ratio <= high & small$Log10_VirBac_Ratio >= low),]
+
+ann4 <- data.frame(
+  intset = c(summary(lm(inset$log10VIRUS ~ inset$log10BACTERIA))$coefficients[1],summary(lm(insetDeep$log10VIRUS ~ insetDeep$log10BACTERIA))$coefficients[1]),
+  slopeset = c(summary(lm(inset$log10VIRUS ~ inset$log10BACTERIA))$coefficients[2],summary(lm(insetDeep$log10VIRUS ~ insetDeep$log10BACTERIA))$coefficients[2]),
+  ALLintset = c(summary(lm(smallLabSet$log10VIRUS ~ smallLabSet$log10BACTERIA))$coefficients[1],summary(lm(DeepSmall$log10VIRUS ~ DeepSmall$log10BACTERIA))$coefficients[1]),
+  ALLslopeset = c(summary(lm(smallLabSet$log10VIRUS ~ smallLabSet$log10BACTERIA))$coefficients[2],summary(lm(DeepSmall$log10VIRUS ~ DeepSmall$log10BACTERIA))$coefficients[2]),
+  MEintset= c(summary(lme(log10VIRUS~log10BACTERIA, random=~1+log10BACTERIA|Study,data=inset))$coefficients$fixed[1],summary(lme(log10VIRUS~log10BACTERIA, random=~1+log10BACTERIA|Study,data=insetDeep))$coefficients$fixed[1]),
+  MEslopeset = c(summary(lme(log10VIRUS~log10BACTERIA, random=~1+log10BACTERIA|Study,data=inset))$coefficients$fixed[2],summary(lme(log10VIRUS~log10BACTERIA, random=~1+log10BACTERIA|Study,data=insetDeep))$coefficients$fixed[2]),
+  DeepShallow = c('<=100m', '>100m'),
+  BacMedians = c(median(inset$log10BACTERIA), median(insetDeep$log10BACTERIA)),
+  VirMedians = c(median(inset$log10VIRUS), median(insetDeep$log10VIRUS))
+  )
+
+ann5 <- data.frame(meX = 3.73, 
+                   meY = 5.3, 
+                   plX = 6.8,
+                   plY = 6.9, 
+                   toX=7, 
+                   toY = 8.3, 
+                   DeepShallow = factor('<=100m', levels = c('<=100m', '>100m')))
+smallInset$DeepShallow <- smallInset$DepthCategory
+summary(smallInset)
+shallowDeepInliers<-ggplot(smallInset, aes(x=log10BACTERIA, y=log10VIRUS)) +
+  geom_point(col='steel blue',pch=20, size=1) +
+  facet_grid(. ~ DeepShallow) +
+  geom_abline(data=ann4, aes(intercept=ALLintset, slope=ALLslopeset), col='#D55E00', size=1) + #orange all data power law line
+  geom_abline(data=ann4, aes(intercept=intset, slope=slopeset), col='chartreuse3', size=1) + #green inset power law line
+  #geom_abline(data=ann4, aes(intercept=MEintset, slope=MEslopeset), col='#33CC33', size=1) + #green mixed effects Fixed Effects line
+  geom_abline(intercept=1, slope=1, col='black', size=1) + #black line
+  geom_segment(data=ann4,aes(x=BacMedians,xend=BacMedians,y=4.8,yend=4.9),arrow=arrow(length=unit(0.3,"cm")),show_guide=F, color="black") +
+  geom_segment(data=ann4,aes(x=3.5,xend=3.6,y=VirMedians,yend=VirMedians),arrow=arrow(length=unit(0.3,"cm")),show_guide=F, color="black") +
+   #geom_text(data=ann5,aes(x=meX,y=meY,label='ME'),show_guide=F,size=6,family="Helvetica", fontface="bold") + 
+   geom_text(data=ann5,aes(x=toX,y=toY,label='10:1'),show_guide=F,size=6,family="Helvetica", fontface="bold") + 
+   geom_text(data=ann5,aes(x=plX,y=plY,label='Power Law'),show_guide=F,size=6,family="Helvetica", fontface="bold") + 
+  labs(list(x=expression('Microbes per mL (log'[10]*' scale)'), 
+            y=expression('Viruses per mL (log'[10]*' scale)')))+
+  theme(panel.margin = unit(2, "lines"),
+        strip.background = element_rect(fill="white"),
+        strip.text.x = element_text(size = 20,face="bold"),
+          aspect.ratio=1,
+          plot.title=element_text(size=32),
+          axis.text=element_text(size=12), 
+          axis.title=element_text(size=16,face="bold"),
+          #text = element_text(size=32),aspect.ratio=1,
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(),
+          axis.line = element_line(colour = "black")) +
+    scale_x_continuous(breaks = c(seq(2.5,8,by=.25)), 
+                     labels = c(insert_minor(seq(2.5,8,by=.5),1,1)), 
+                     limits = c(3.5,7.5), 
+                     expand = c(0,0)) +
+    scale_y_continuous(breaks = c(seq(4.5,9,by=.25)), 
+                     labels = c(insert_minor(seq(4.5,9,by=.5),1,1)), 
+                     limits = c(4.8,8.75), 
+                     expand = c(0,0))
+shallowDeepInliers
+pdf("output/figures/pdf/shallowDeepInliers.pdf", width=10, height=7)
+print(shallowDeepInliers)
+dev.off()
+
+jpeg("output/figures/jpg/shallowDeepInliers.jpg", width=800, height=560)
+print(shallowDeepInliers)
+dev.off()
+
+kable(ann4)
+
+#write.table(data, "VIRBACDATA.txt", sep=",")
+```
+
+
+```{r, echo = FALSE, warning=F, results='hold', message=FALSE}
+
+load("output/data/DATA.RData")
+# plot(sort(data$DEPTH))
+# plot(ecdf(data$DEPTH))
+# median(data$DEPTH)
+# 
+# levels(data$Study)
+# require(plyr)
+# data$Study<-revalue(data$Study, c("Balsom - arctic"="ARCTICSBI",'Bratbak 2001'='NORTHSEA2001', "MiddleboeGreenland2012"="GREENLAND2012", "MiddleBoeIndia" = 'INDIANOCEAN2006', "BENFORDBASIN" = 'BEDFORDBASIN', "FeCycle   "= "FECYCLE1", "FeCycle II"= "FECYCLE2","Raunefjord 2000"="RAUNEFJORD2000","Stratiphyt I"="STRATIPHYT1","Stratiphyt II"="STRATIPHYT2","Trout"="TROUT","GeoTraces"="GEOTRACES","GeoTraces_Leg3"="GEOTRACES_LEG3"))
+# index <- which(data$Study == 'WINTER - DYFAMED' | data$Study == 'DFO')
+# data <- data[-index, ]
+# data<-data[which(!is.na(data$BACTERIA) & !is.na(data$VIRUS)), ]
+# data$Study<-droplevels(data$Study)
+pdf("output/figures/pdf/DepthMedianPlot.pdf", width=6, height=6)
+plot(sort(log10(data$DEPTH)), pch=20, ylab='Log10 Depth', col='steelblue')
+abline(h=median(log10(data$DEPTH)), col='black')
+abline(v=length(data$DEPTH)/2, col='black')
+dev.off()
+# plot(ecdf(log10(data$DEPTH)), xlab='Log10 Depth', main='')
+# abline(h=.5, col='chartreuse3')
+# abline(v=median(log10(data$DEPTH)), col='chartreuse3')
+
+data$log10BACTERIA<-log10(data$BACTERIA)
+data$log10VIRUS<-log10(data$VIRUS)
+lm(data$log10VIRUS~data$log10BACTERIA)
+plot(data$log10VIRUS~ data$log10BACTERIA, pch=46, col='steelblue')
+
+
+shallowslopes<-c()
+deepslopes<-c()
+cutoff<-seq(50,150)
+cutoffquantiles<-c()
+for (i in cutoff){
+  s<-summary(lm(data$log10VIRUS[which(data$DEPTH<=i)]~data$log10BACTERIA[which(data$DEPTH<=i)]))
+  shallowslope<-s$coefficients[2]
+  shallowslopes<-c(shallowslopes,shallowslope)
+
+  s<-summary(lm(data$log10VIRUS[which(data$DEPTH>i)]~data$log10BACTERIA[which(data$DEPTH>i)]))
+  deepslope<-s$coefficients[2]
+  deepslopes<-c(deepslopes,deepslope)
+  cutoffquantiles<-c(cutoffquantiles,length(data$log10VIRUS[which(data$DEPTH<=i)])/length(data$log10VIRUS))
+}
+cbind(shallowslopes,deepslopes,cutoff)
+pdf("output/figures/pdf/SlopesByCutoff.pdf", width=6, height=6)
+plot(cutoff,shallowslopes, pch=20, col='steelblue', xlim = c(50,150), ylim = c(0,1), axes=T,
+     xlab='Depth Threshold (m)', ylab='Power-law exponent')
+points(cutoff,deepslopes, pch=20, col='chartreuse3')
+axis(side=1, at=c(seq(50,150,length=6)))
+axis(side=2, at=c(seq(0,1,length=6)))
+legend("bottomleft", inset=.05,
+       c("Shallow","Deep"), fill=c('steelblue','chartreuse3'), horiz=F, bty = "n")
+dev.off()
+
+pdf("output/figures/pdf/SlopesByCutoffALT.pdf", width=6, height=6)
+#par(bty="l")
+plot(cutoff,shallowslopes, pch=20, col='steelblue', ylim = c(0,1), axes=T,
+     xlab='Depth Threshold (m)', ylab='Power-law exponent', bty="l")
+#axis(side=1, at=c(seq(50,150,length=6)))
+#axis(side=2, at=c(seq(0,1,length=6)))
+axis(1, xaxp = c(50, 150, 5))
+axis(2, xaxp = c(0, 1, 9))
+points(cutoff,deepslopes, pch=20, col='chartreuse3')
+#legend("topright", inset=.05, title="Slopes by cutoff point",
+legend("bottomleft", inset=.05,
+       c("Shallow","Deep"), fill=c('steelblue','chartreuse3'), horiz=F, bty = "n")
+dev.off()
+```
