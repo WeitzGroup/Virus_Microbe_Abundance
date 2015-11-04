@@ -17,9 +17,7 @@ of marine sample data; (ii) reasons to call into question the use of 10:1 ratio 
 between viruses and microbes from marine environments, i.e. that for marine samples, one can expect to observe 
 marine viruses to be an order of magnitude more abundant than marine microbes.
 
-[<img src="http://www.nimbios.org/images/WG_ocean_group_700x451.jpg">](http://www.nimbios.org/workinggroups/WG_ocean_viral_dyn)
-
-<a href="default.asp">
+<a href="http://www.nimbios.org/workinggroups/WG_ocean_viral_dyn">
 <img src="http://www.nimbios.org/images/WG_ocean_group_700x451.jpg" width="200" height="200"">
 </a>
 
