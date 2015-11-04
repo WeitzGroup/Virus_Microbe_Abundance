@@ -18,5 +18,9 @@ between viruses and microbes from marine environments, i.e. that for marine samp
 marine viruses to be an order of magnitude more abundant than marine microbes.
 
 [<img src="http://www.nimbios.org/images/WG_ocean_group_700x451.jpg">](http://www.nimbios.org/workinggroups/WG_ocean_viral_dyn)
-<img src="http://www.nimbios.org/images/WG_ocean_group_700x451.jpg" style="width:300">
+
+<a href="default.asp">
+<img src="http://www.nimbios.org/images/WG_ocean_group_700x451.jpg" width="200" height="200"">
+</a>
+
 [<img src="http://ecotheory.biology.gatech.edu/sites/default/files/just_a_phage.jpg">](https://cwigington.shinyapps.io/VirBacDash)
