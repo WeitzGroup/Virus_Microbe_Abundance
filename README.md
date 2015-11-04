@@ -20,5 +20,4 @@ marine viruses to be an order of magnitude more abundant than marine microbes.
 <a href="http://www.nimbios.org/workinggroups/WG_ocean_viral_dyn">
 <img src="http://www.nimbios.org/images/WG_ocean_group_700x451.jpg" width="233" height="150"">
 </a>
-
 [<img src="http://ecotheory.biology.gatech.edu/sites/default/files/just_a_phage.jpg">](https://cwigington.shinyapps.io/VirBacDash)
