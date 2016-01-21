@@ -1,0 +1,7 @@
+name: Publish Document
+account: rpubs
+server: rpubs.com
+bundleId:
+        https://api.rpubs.com/api/v1/document/144691/a57ff729bea74e05827b325eb8ac7eef
+url: http://rpubs.com/cwigington3/144691
+when: 1453318115.26145
